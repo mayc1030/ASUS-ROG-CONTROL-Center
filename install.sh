@@ -28,7 +28,8 @@ cp "$DIR/bin/asus-aura" /usr/local/bin/asus-aura
 cp "$DIR/bin/asus_aura.py" /usr/local/bin/asus_aura.py
 cp "$DIR/bin/auto-teclado-daemon" /usr/local/bin/auto-teclado-daemon
 cp "$DIR/bin/toggle-teclado-laptop" /usr/local/bin/toggle-teclado-laptop
-chmod 755 /usr/local/bin/asus-control-center /usr/local/bin/asus-fan /usr/local/bin/asus-aura /usr/local/bin/asus_aura.py /usr/local/bin/auto-teclado-daemon /usr/local/bin/toggle-teclado-laptop
+cp "$DIR/bin/cambiar-driver-550.sh" /usr/local/bin/cambiar-driver-550.sh
+chmod 755 /usr/local/bin/asus-control-center /usr/local/bin/asus-fan /usr/local/bin/asus-aura /usr/local/bin/asus_aura.py /usr/local/bin/auto-teclado-daemon /usr/local/bin/toggle-teclado-laptop /usr/local/bin/cambiar-driver-550.sh
 
 # 2. Configurar permisos sudoers sin contraseña para el control de perfiles e iluminación
 echo "--> [2/5] Configurando permisos sudoers para cambios instantáneos de ventilación e iluminación..."

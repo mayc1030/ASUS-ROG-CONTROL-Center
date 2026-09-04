@@ -479,7 +479,7 @@ class AsusControlCenter(Gtk.Window):
         card3.pack_start(c3_title, False, False, 0)
 
         c3_desc = Gtk.Label()
-        c3_desc.set_markup("<span foreground='#9ca3af' font='10'>• <b>Intel:</b> Máxima estabilidad, temperatura de 40°C y cero pantallas negras (Recomendado).\n• <b>On-Demand:</b> Híbrido inteligente.\n• <b>NVIDIA:</b> Máxima potencia continua para juegos pesados.</span>")
+        c3_desc.set_markup("<span foreground='#9ca3af' font='10'>• <b>On-Demand (Recomendado):</b> Híbrido inteligente con salida HDMI activa para monitores externos.\n• <b>NVIDIA:</b> Gráfica dedicada al 100% para juegos pesados y renderizado.\n• <b>Intel:</b> Apaga la GTX 1060 para ahorrar batería (¡Atención: desactiva los puertos HDMI/Mini-DP externos!).</span>")
         c3_desc.set_halign(Gtk.Align.START)
         card3.pack_start(c3_desc, False, False, 0)
 
@@ -488,6 +488,14 @@ class AsusControlCenter(Gtk.Window):
         self.lbl_prime_status.set_halign(Gtk.Align.START)
         c3_status_box.pack_start(self.lbl_prime_status, True, True, 0)
         card3.pack_start(c3_status_box, False, False, 0)
+
+        self.lbl_driver_info = Gtk.Label()
+        self.lbl_driver_info.set_halign(Gtk.Align.START)
+        card3.pack_start(self.lbl_driver_info, False, False, 0)
+
+        self.btn_install_550 = Gtk.Button(label="🛡️ Aplicar Blindaje de Pantalla y Estabilización PCIe/GPU")
+        self.btn_install_550.connect("clicked", self.on_switch_driver_clicked)
+        card3.pack_start(self.btn_install_550, False, False, 0)
 
         c3_btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         c3_btns.set_homogeneous(True)
@@ -605,6 +613,40 @@ class AsusControlCenter(Gtk.Window):
         dialog.run()
         dialog.destroy()
         self.update_telemetry()
+
+    def on_switch_driver_clicked(self, widget):
+        paths = [
+            "/usr/local/bin/cambiar-driver-550.sh",
+            os.path.expanduser("~/cambiar-driver-550.sh"),
+            os.path.expanduser("~/ASUS-ROG-CONTROL-Center/bin/cambiar-driver-550.sh")
+        ]
+        script_path = None
+        for p in paths:
+            if os.path.exists(p):
+                script_path = p
+                break
+
+        if script_path:
+            dialog = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=Gtk.MessageType.QUESTION,
+                buttons=Gtk.ButtonsType.OK_CANCEL,
+                text="¿Aplicar Blindaje de Pantalla y Estabilización PCIe/GPU?"
+            )
+            dialog.format_secondary_text(
+                "Este asistente aplicará automáticamente los siguientes ajustes:\n\n"
+                "1. Blindar el sensor magnético de la tapa (ignorar falsos cierres de tapa).\n"
+                "2. Estabilizar el bus PCIe en GRUB (pcie_aspm=off) para evitar caídas de la GPU.\n"
+                "3. Fijar parámetros de energía de NVIDIA (evita caídas de bus en reposo).\n"
+                "4. Asegurar el modo On-Demand para que los puertos HDMI/Mini-DP funcionen siempre.\n\n"
+                "Se abrirá una terminal para ingresar tu contraseña de administrador y ver el proceso en vivo."
+            )
+            res = dialog.run()
+            dialog.destroy()
+            if res == Gtk.ResponseType.OK:
+                terminal_cmd = f"mate-terminal --title='Blindaje y Estabilización ASUS ROG' -- bash -c 'sudo bash {script_path}; echo; echo \"===================================================\"; echo \"✔ Proceso finalizado. Presiona ENTER para salir.\"; read -r line' 2>/dev/null || x-terminal-emulator -e 'bash -c \"sudo bash {script_path}; read -p \\\"Presiona ENTER...\\\"\"'"
+                subprocess.Popen(terminal_cmd, shell=True)
 
     def on_reinstall_all_clicked(self, widget):
         script_path = "/home/maycol/instalar-ventiladores.sh"
@@ -780,7 +822,31 @@ class AsusControlCenter(Gtk.Window):
             else:
                 self.lbl_lid_status.set_markup("<span foreground='#f59e0b'>○ <b>Protección Inactiva:</b> La pantalla puede apagarse si el sensor magnético detecta cierre.</span>")
 
-            # Prime status
+            # Driver version and stabilization status
+            driver_ver = "N/A"
+            try:
+                out_ver = subprocess.check_output("cat /proc/driver/nvidia/version 2>/dev/null | head -n 1 | awk '{print $8}'", shell=True, text=True).strip()
+                if out_ver: driver_ver = out_ver
+            except: pass
+
+            grub_ok = False
+            try:
+                with open("/proc/cmdline", "r") as f:
+                    grub_ok = "pcie_aspm=off" in f.read()
+            except: pass
+
+            pwr_ok = os.path.exists("/etc/modprobe.d/nvidia-power-fix.conf")
+
+            if lid_protected and grub_ok and pwr_ok:
+                self.lbl_driver_info.set_markup(f"<span foreground='#34d399'>✔ <b>Sistema Blindado:</b> Driver {driver_ver} • Bus PCIe Estable • HDMI Activo.</span>")
+                self.btn_install_550.set_label("🛡️ Volver a Ejecutar Blindaje / Estabilización")
+            elif lid_protected and pwr_ok:
+                self.lbl_driver_info.set_markup(f"<span foreground='#38bdf8'>ℹ️ <b>Reinicio Pendiente:</b> Blindaje configurado. Reinicia para activar kernel PCIe.</span>")
+                self.btn_install_550.set_label("🛡️ Blindaje Configurado (Reiniciar para aplicar)")
+            else:
+                self.lbl_driver_info.set_markup(f"<span foreground='#f59e0b'>⚠️ <b>Estabilización Pendiente:</b> Falta blindar bus PCIe y energía para evitar apagones.</span>")
+                self.btn_install_550.set_label("🛡️ Aplicar Blindaje de Pantalla y Estabilización PCIe/GPU")
+
             mode_color = "#34d399" if prime_val == "intel" else ("#38bdf8" if prime_val == "on-demand" else "#ef4444")
             self.lbl_prime_status.set_markup(f"<span foreground='#ffffff'><b>Modo Actual:</b> <span foreground='{mode_color}' weight='bold'>{prime_val.upper()}</span></span>")
         except: pass
@@ -869,20 +935,34 @@ El i7-8750H vuela a 2.2 GHz de base. Para trabajar fresco a 45°C sin ruido:
 Para volver a activar toda la potencia a 4.1 GHz cuando vayas a jugar:
   echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
 
-5. CONFIGURACIÓN CORRECTA DE LA GRÁFICA (INTEL VS NVIDIA)
+5. CONFIGURACIÓN CORRECTA DE LA GRÁFICA Y PUERTOS DE PANTALLA (HDMI / MINI-DP)
 --------------------------------------------------------------------------------
-Para máxima estabilidad en el día a día (0W de consumo y cero pantallas negras):
-  sudo prime-select intel
-  sudo reboot
+En el ASUS GL504GM, las salidas físicas HDMI 2.0 y Mini-DisplayPort están cableadas
+directamente a los pines de la NVIDIA GTX 1060.
+  • MODO RECOMENDADO: 'prime-select on-demand'
+    Permite que el sistema use la Intel UHD 630 para el escritorio mientras mantiene
+    los puertos externos HDMI y Mini-DP 100% disponibles.
+    Comando: sudo prime-select on-demand
 
-Para jugar o aplicaciones 3D intensivas:
-  sudo prime-select on-demand  (o 'nvidia' para máxima potencia continua)
+  • ADVERTENCIA SOBRE 'prime-select intel':
+    Si activas modo 'intel', la GPU dedicada se apaga por completo y NINGUNA pantalla
+    externa conectada por HDMI funcionará. Además, la placa base puede forzar el
+    ventilador 2 al 100% por falta de lectura térmica de GPU.
 
-6. PROTECCIÓN CONTRA APAGADOS DE PANTALLA (SENSOR DE TAPA FALSO)
+6. BLINDAJE CONTRA PANTALLAS NEGRAS Y ESTABILIZACIÓN PCIe
 --------------------------------------------------------------------------------
-Si la pantalla se apaga sola de la nada, se debe a falsas lecturas del sensor magnético.
-Para obligar a Linux a ignorar la tapa y que la pantalla no se apague nunca:
-  echo -e "[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore" | sudo tee /etc/systemd/logind.conf.d/ignore-lid.conf
+Si la pantalla se apaga sola de forma intermitente o la GPU se desconecta del bus:
+  1) Sensor de tapa falso (ignorar pulsos magnéticos involuntarios):
+     echo -e "[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore" | sudo tee /etc/systemd/logind.conf.d/ignore-lid.conf
+
+  2) Estabilización de bus PCIe en GRUB (evita Xid 79: GPU fallen off the bus):
+     Añadir 'pcie_aspm=off pci=noaer i915.enable_psr=0' a GRUB_CMDLINE_LINUX_DEFAULT
+     en /etc/default/grub y ejecutar: sudo update-grub
+
+  3) Evitar desconexión por reposo profundo D3cold de NVIDIA:
+     Crear /etc/modprobe.d/nvidia-power-fix.conf con:
+     options nvidia NVreg_DynamicPowerManagement=0
+     options nvidia NVreg_PreserveVideoMemoryAllocations=1
 
 7. TECLADO INTERNO DAÑADO (CRUCE DE MATRIZ Y CÓMO APAGARLO)
 --------------------------------------------------------------------------------

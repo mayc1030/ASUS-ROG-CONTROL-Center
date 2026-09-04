@@ -33,6 +33,7 @@ rm -f /usr/local/bin/asus-aura
 rm -f /usr/local/bin/asus_aura.py
 rm -f /usr/local/bin/auto-teclado-daemon
 rm -f /usr/local/bin/toggle-teclado-laptop
+rm -f /usr/local/bin/cambiar-driver-550.sh
 
 # Eliminar sudoers y accesos directos
 rm -f /etc/sudoers.d/asus-fan-control
