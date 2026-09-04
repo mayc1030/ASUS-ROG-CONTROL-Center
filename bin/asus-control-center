@@ -12,6 +12,17 @@ import subprocess
 import os
 import re
 import glob
+import sys
+
+# Importar controlador de iluminación ASUS Aura RGB
+try:
+    from asus_aura import AuraController
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from asus_aura import AuraController
+    except ImportError:
+        AuraController = None
 
 ASUS_WMI = "/sys/devices/platform/asus-nb-wmi"
 TURBO_FILE = "/sys/devices/system/cpu/intel_pstate/no_turbo"
@@ -25,6 +36,14 @@ class AsusControlCenter(Gtk.Window):
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(14)
         
+        # Inicializar controlador de luces Aura
+        self.aura_ctrl = None
+        if AuraController:
+            try:
+                self.aura_ctrl = AuraController()
+            except Exception as e:
+                print(f"Aviso: No se pudo inicializar AuraController: {e}")
+
         self.apply_dark_theme()
 
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -62,6 +81,7 @@ class AsusControlCenter(Gtk.Window):
         # Pestañas
         self.notebook.append_page(self.create_fans_tab(), Gtk.Label(label="❄️ Ventiladores y Rendimiento"))
         self.notebook.append_page(self.create_keyboard_tab(), Gtk.Label(label="⌨️ Control de Teclado"))
+        self.notebook.append_page(self.create_lighting_tab(), Gtk.Label(label="🌈 Iluminación Aura RGB"))
         self.notebook.append_page(self.create_services_tab(), Gtk.Label(label="⚙️ Servicios e Inicio Automático"))
         self.notebook.append_page(self.create_guide_tab(), Gtk.Label(label="📖 Guía para Otras Distros"))
 
@@ -181,6 +201,26 @@ class AsusControlCenter(Gtk.Window):
         }
         .btn-master-install:hover {
             background: linear-gradient(135deg, #dc2626, #ef4444);
+        }
+
+        .aura-zone-box {
+            background-color: #16181f;
+            border-radius: 8px;
+            border: 1px solid #282b36;
+            padding: 8px;
+        }
+
+        .btn-preset {
+            background-color: #1a1c24;
+            border: 1px solid #2d313e;
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #e2e8f0;
+        }
+
+        .btn-preset:hover {
+            background-color: #272a38;
+            border-color: #3b82f6;
         }
 
         textview text {
@@ -372,6 +412,383 @@ class AsusControlCenter(Gtk.Window):
 
         box.pack_start(ext_card, False, False, 0)
         return box
+
+    # --------------------------------------------------------------------------
+    # PESTAÑA: ILUMINACIÓN AURA RGB (7 ZONAS, BARRA Y PANTALLA TRASERA)
+    # --------------------------------------------------------------------------
+    def create_lighting_tab(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.set_border_width(12)
+        scrolled.add(box)
+
+        # 1. Tarjeta de Estado y Modo Stealth
+        hdr_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+        hdr_card.get_style_context().add_class("card")
+
+        info_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        t_lbl = Gtk.Label()
+        t_lbl.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🌈 Iluminación ASUS Aura Sync (Teclado, Barra y Pantalla Trasera)</span>")
+        t_lbl.set_halign(Gtk.Align.START)
+        info_vbox.pack_start(t_lbl, False, False, 0)
+
+        self.lbl_aura_hw = Gtk.Label()
+        self.lbl_aura_hw.set_halign(Gtk.Align.START)
+        if self.aura_ctrl and self.aura_ctrl.dev_path:
+            self.lbl_aura_hw.set_markup(f"<span foreground='#34d399' font='10'>● <b>Controlador Conectado:</b> {self.aura_ctrl.dev_path} (ASUS N-KEY 0b05:1866)</span>")
+        else:
+            self.lbl_aura_hw.set_markup("<span foreground='#ef4444' font='10'>● Controlador Aura N-KEY no detectado.</span>")
+        info_vbox.pack_start(self.lbl_aura_hw, False, False, 0)
+
+        sub_desc = Gtk.Label()
+        sub_desc.set_markup("<span foreground='#9ca3af' font='9'>Controla las 4 zonas del teclado, la barra de luz frontal y el logotipo ROG de la tapa de la pantalla.</span>")
+        sub_desc.set_halign(Gtk.Align.START)
+        info_vbox.pack_start(sub_desc, False, False, 0)
+
+        hdr_card.pack_start(info_vbox, True, True, 0)
+
+        # Switch de Modo Stealth / Apagar
+        stealth_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        stealth_lbl = Gtk.Label()
+        stealth_lbl.set_markup("<span foreground='#fca5a5' font='10' weight='bold'>Modo Stealth (Apagar)</span>")
+        self.switch_stealth = Gtk.Switch()
+        self.switch_stealth.set_valign(Gtk.Align.CENTER)
+        is_off = self.aura_ctrl.state.get("is_off", False) if self.aura_ctrl else False
+        self.switch_stealth.set_active(is_off)
+        self.switch_stealth.connect("state-set", self.on_stealth_switched)
+        stealth_box.pack_start(stealth_lbl, False, False, 0)
+        stealth_box.pack_start(self.switch_stealth, False, False, 0)
+        hdr_card.pack_end(stealth_box, False, False, 0)
+
+        box.pack_start(hdr_card, False, False, 0)
+
+        # 2. Tarjeta de Brillo Maestro
+        b_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        b_card.get_style_context().add_class("card")
+
+        b_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        b_title = Gtk.Label()
+        b_title.set_markup("<span foreground='#ffffff' weight='bold' font='11'>💡 Intensidad de Brillo Maestro</span>")
+        b_hdr.pack_start(b_title, False, False, 0)
+
+        self.lbl_brightness_val = Gtk.Label()
+        cur_b = self.aura_ctrl.state.get("brightness", 3) if self.aura_ctrl else 3
+        self.lbl_brightness_val.set_markup(f"<span foreground='#38bdf8' font='11' weight='bold'>Nivel {cur_b}/3</span>")
+        b_hdr.pack_end(self.lbl_brightness_val, False, False, 0)
+        b_card.pack_start(b_hdr, False, False, 0)
+
+        # Slider de brillo
+        self.scale_brightness = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 3, 1)
+        self.scale_brightness.set_value(cur_b)
+        self.scale_brightness.set_draw_value(False)
+        self.scale_brightness.add_mark(0, Gtk.PositionType.BOTTOM, "0 (Apagado)")
+        self.scale_brightness.add_mark(1, Gtk.PositionType.BOTTOM, "1 (Bajo)")
+        self.scale_brightness.add_mark(2, Gtk.PositionType.BOTTOM, "2 (Medio)")
+        self.scale_brightness.add_mark(3, Gtk.PositionType.BOTTOM, "3 (Máximo)")
+        self.scale_brightness.connect("value-changed", self.on_brightness_scale_changed)
+        b_card.pack_start(self.scale_brightness, False, False, 0)
+
+        box.pack_start(b_card, False, False, 0)
+
+        # 3. Tarjeta de Control por Zonas
+        zones_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        zones_card.get_style_context().add_class("card")
+
+        z_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        z_title = Gtk.Label()
+        z_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>⌨️ Personalización por Zonas (Teclado, Barra y Pantalla)</span>")
+        z_header.pack_start(z_title, False, False, 0)
+
+        # Switch Sincronizar Todo
+        sync_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        sync_lbl = Gtk.Label()
+        sync_lbl.set_markup("<span foreground='#9ca3af' font='10'>Sincronizar Todas (Global):</span>")
+        self.switch_sync = Gtk.Switch()
+        is_sync = self.aura_ctrl.state.get("sync", True) if self.aura_ctrl else True
+        self.switch_sync.set_active(is_sync)
+        self.switch_sync.connect("state-set", self.on_sync_switched)
+        sync_box.pack_start(sync_lbl, False, False, 0)
+        sync_box.pack_start(self.switch_sync, False, False, 0)
+        z_header.pack_end(sync_box, False, False, 0)
+
+        zones_card.pack_start(z_header, False, False, 0)
+
+        # 3.1 Subsección: Teclado (4 Zonas)
+        kb_sub_lbl = Gtk.Label()
+        kb_sub_lbl.set_markup("<span foreground='#38bdf8' weight='bold' font='10'>⌨️ TECLADO RGB (4 ZONAS INDEPENDIENTES)</span>")
+        kb_sub_lbl.set_halign(Gtk.Align.START)
+        zones_card.pack_start(kb_sub_lbl, False, False, 0)
+
+        kb_zones_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        kb_zones_hbox.set_homogeneous(True)
+
+        kb_zone_defs = [
+            ("Zona 1 (WASD)", "Izquierda / Letras Q-W-E-R"),
+            ("Zona 2 (Centro-Izq)", "Centro / Teclas T-Y-U-I"),
+            ("Zona 3 (Centro-Der)", "Centro / Teclas O-P-Enter"),
+            ("Zona 4 (NumPad)", "Derecha / Teclado Numérico")
+        ]
+
+        saved_zones = self.aura_ctrl.state.get("zones", ["#ff0000"] * 7) if self.aura_ctrl else ["#ff0000"] * 7
+        self.zone_buttons = []
+
+        for i, (zn, desc) in enumerate(kb_zone_defs):
+            zbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            zbox.get_style_context().add_class("aura-zone-box")
+
+            zl = Gtk.Label()
+            zl.set_markup(f"<span foreground='#ffffff' font='11' weight='bold'>{zn}</span>")
+            zl.set_halign(Gtk.Align.CENTER)
+            zbox.pack_start(zl, False, False, 0)
+
+            zd = Gtk.Label()
+            zd.set_markup(f"<span foreground='#6b7280' font='8'>{desc}</span>")
+            zd.set_halign(Gtk.Align.CENTER)
+            zbox.pack_start(zd, False, False, 0)
+
+            rgba = Gdk.RGBA()
+            color_hex = saved_zones[i] if i < len(saved_zones) else "#ff0000"
+            rgba.parse(color_hex)
+            cbtn = Gtk.ColorButton.new_with_rgba(rgba)
+            cbtn.set_title(f"Seleccionar color para {zn}")
+            cbtn.connect("color-set", self.on_zone_color_picked, i)
+            zbox.pack_start(cbtn, False, False, 4)
+
+            self.zone_buttons.append(cbtn)
+            kb_zones_hbox.pack_start(zbox, True, True, 0)
+
+        zones_card.pack_start(kb_zones_hbox, False, False, 0)
+
+        # 3.2 Subsección: Chasis y Pantalla (3 Zonas: Barra Frontal y Logo Trasero)
+        periph_sub_lbl = Gtk.Label()
+        periph_sub_lbl.set_markup("<span foreground='#38bdf8' weight='bold' font='10'>✨ BARRA FRONTAL Y LOGO TRASERO (PANTALLA)</span>")
+        periph_sub_lbl.set_halign(Gtk.Align.START)
+        zones_card.pack_start(periph_sub_lbl, False, False, 4)
+
+        periph_zones_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        periph_zones_hbox.set_homogeneous(True)
+
+        periph_zone_defs = [
+            ("Zona 5 (Barra Frontal Izq)", "Borde inferior frontal izquierdo"),
+            ("Zona 6 (Barra Frontal Der)", "Borde inferior frontal derecho"),
+            ("Zona 7 (Logo Trasero Pantalla)", "Logotipo ROG en la tapa de pantalla")
+        ]
+
+        for j, (zn, desc) in enumerate(periph_zone_defs):
+            actual_idx = 4 + j
+            zbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            zbox.get_style_context().add_class("aura-zone-box")
+
+            zl = Gtk.Label()
+            zl.set_markup(f"<span foreground='#ffffff' font='11' weight='bold'>{zn}</span>")
+            zl.set_halign(Gtk.Align.CENTER)
+            zbox.pack_start(zl, False, False, 0)
+
+            zd = Gtk.Label()
+            zd.set_markup(f"<span foreground='#6b7280' font='8'>{desc}</span>")
+            zd.set_halign(Gtk.Align.CENTER)
+            zbox.pack_start(zd, False, False, 0)
+
+            rgba = Gdk.RGBA()
+            color_hex = saved_zones[actual_idx] if actual_idx < len(saved_zones) else "#ff0000"
+            rgba.parse(color_hex)
+            cbtn = Gtk.ColorButton.new_with_rgba(rgba)
+            cbtn.set_title(f"Seleccionar color para {zn}")
+            cbtn.connect("color-set", self.on_zone_color_picked, actual_idx)
+            zbox.pack_start(cbtn, False, False, 4)
+
+            self.zone_buttons.append(cbtn)
+            periph_zones_hbox.pack_start(zbox, True, True, 0)
+
+        zones_card.pack_start(periph_zones_hbox, False, False, 0)
+
+        # Nota explicativa
+        logo_note = Gtk.Label()
+        logo_note.set_markup(
+            "<span foreground='#9ca3af' font='10'>"
+            "• <b>Control Total Independiente:</b> Puedes seleccionar un color diferente para cada zona apagando el switch de sincronización.\n"
+            "• <b>Logo Trasero y Barra:</b> Ahora disponen de control independiente de hardware gracias al direccionamiento de 7 zonas."
+            "</span>"
+        )
+        logo_note.set_halign(Gtk.Align.START)
+        zones_card.pack_start(logo_note, False, False, 0)
+
+        box.pack_start(zones_card, False, False, 0)
+
+        # 4. Tarjeta de Presets Rápidos y Modos Dinámicos
+        presets_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        presets_card.get_style_context().add_class("card")
+
+        pr_title = Gtk.Label()
+        pr_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🎨 Presets Rápidos y Modos Dinámicos (1 Solo Clic)</span>")
+        pr_title.set_halign(Gtk.Align.START)
+        presets_card.pack_start(pr_title, False, False, 0)
+
+        # Fila 1 de Presets
+        row1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row1.set_homogeneous(True)
+
+        p_red = self.create_preset_button("🔴 ROG Red", lambda: self.apply_quick_preset("red"))
+        p_cyber = self.create_preset_button("🟣 Cyberpunk 7Z", lambda: self.apply_quick_preset("cyberpunk"))
+        p_ice = self.create_preset_button("❄️ Ice Blue", lambda: self.apply_quick_preset("blue"))
+        p_green = self.create_preset_button("🟢 Matrix Green", lambda: self.apply_quick_preset("green"))
+        p_white = self.create_preset_button("⚪ Blanco Puro", lambda: self.apply_quick_preset("white"))
+
+        row1.pack_start(p_red, True, True, 0)
+        row1.pack_start(p_cyber, True, True, 0)
+        row1.pack_start(p_ice, True, True, 0)
+        row1.pack_start(p_green, True, True, 0)
+        row1.pack_start(p_white, True, True, 0)
+        presets_card.pack_start(row1, False, False, 0)
+
+        # Fila 2 de Presets
+        row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row2.set_homogeneous(True)
+
+        p_cyan = self.create_preset_button("💎 Cian Neón", lambda: self.apply_quick_preset("cyan"))
+        p_rainbow = self.create_preset_button("🌈 Arcoíris Onda", lambda: self.apply_quick_preset("rainbow"))
+        p_cycle = self.create_preset_button("🔄 Ciclo Color", lambda: self.apply_quick_preset("cycle"))
+        p_breath = self.create_preset_button("🫁 Respiración", lambda: self.apply_quick_preset("breathing"))
+        p_off = self.create_preset_button("🌑 Apagar Luces", lambda: self.apply_quick_preset("off"))
+
+        row2.pack_start(p_cyan, True, True, 0)
+        row2.pack_start(p_rainbow, True, True, 0)
+        row2.pack_start(p_cycle, True, True, 0)
+        row2.pack_start(p_breath, True, True, 0)
+        row2.pack_start(p_off, True, True, 0)
+        presets_card.pack_start(row2, False, False, 0)
+
+        box.pack_start(presets_card, False, False, 0)
+
+        return scrolled
+
+    def create_preset_button(self, label_text, callback):
+        btn = Gtk.Button()
+        btn.get_style_context().add_class("btn-preset")
+        lbl = Gtk.Label()
+        lbl.set_markup(f"<span font='10'><b>{label_text}</b></span>")
+        btn.add(lbl)
+        btn.connect("clicked", lambda b: callback())
+        return btn
+
+    def on_stealth_switched(self, switch, state):
+        if not self.aura_ctrl:
+            return False
+        if state:
+            self.aura_ctrl.turn_off()
+            self.scale_brightness.set_value(0)
+            self.lbl_brightness_val.set_markup("<span foreground='#ef4444' font='11' weight='bold'>Nivel 0/3 (Apagado)</span>")
+        else:
+            self.aura_ctrl.restore_state()
+            b = self.aura_ctrl.state.get("brightness", 3)
+            self.scale_brightness.set_value(b)
+            self.lbl_brightness_val.set_markup(f"<span foreground='#38bdf8' font='11' weight='bold'>Nivel {b}/3</span>")
+            self.refresh_zone_buttons_from_state()
+        return False
+
+    def on_brightness_scale_changed(self, scale):
+        if not self.aura_ctrl:
+            return
+        val = int(scale.get_value())
+        self.aura_ctrl.set_brightness(val)
+        if val == 0:
+            self.lbl_brightness_val.set_markup("<span foreground='#ef4444' font='11' weight='bold'>Nivel 0/3 (Apagado)</span>")
+            self.switch_stealth.handler_block_by_func(self.on_stealth_switched)
+            self.switch_stealth.set_active(True)
+            self.switch_stealth.handler_unblock_by_func(self.on_stealth_switched)
+        else:
+            self.lbl_brightness_val.set_markup(f"<span foreground='#38bdf8' font='11' weight='bold'>Nivel {val}/3</span>")
+            self.switch_stealth.handler_block_by_func(self.on_stealth_switched)
+            self.switch_stealth.set_active(False)
+            self.switch_stealth.handler_unblock_by_func(self.on_stealth_switched)
+
+    def on_sync_switched(self, switch, state):
+        if not self.aura_ctrl:
+            return False
+        self.aura_ctrl.state["sync"] = state
+        self.aura_ctrl.save_state()
+        if state and self.zone_buttons:
+            rgba = self.zone_buttons[0].get_rgba()
+            r, g, b = int(rgba.red * 255), int(rgba.green * 255), int(rgba.blue * 255)
+            hex_c = f"#{r:02x}{g:02x}{b:02x}"
+            self.aura_ctrl.set_single_static(hex_c)
+            for btn in self.zone_buttons:
+                btn.set_rgba(rgba)
+        return False
+
+    def on_zone_color_picked(self, color_button, zone_idx):
+        if not self.aura_ctrl:
+            return
+        rgba = color_button.get_rgba()
+        r, g, b = int(rgba.red * 255), int(rgba.green * 255), int(rgba.blue * 255)
+        hex_c = f"#{r:02x}{g:02x}{b:02x}"
+
+        is_sync = self.switch_sync.get_active()
+        if is_sync:
+            self.aura_ctrl.set_single_static(hex_c)
+            for btn in self.zone_buttons:
+                btn.set_rgba(rgba)
+        else:
+            # zone_idx es 0..6 -> Hardware zone es 1..7
+            self.aura_ctrl.set_zone_color(zone_idx + 1, hex_c)
+
+        if self.scale_brightness.get_value() == 0:
+            self.scale_brightness.set_value(3)
+
+    def apply_quick_preset(self, preset_name):
+        if not self.aura_ctrl:
+            return
+        if preset_name == "red":
+            self.aura_ctrl.set_single_static("#ff0000")
+        elif preset_name == "cyberpunk":
+            cyberpunk_colors = [
+                "#ff0055",  # 1: WASD / Neon Pink
+                "#aa00ff",  # 2: Centro-Izq / Electric Purple
+                "#00d4ff",  # 3: Centro-Der / Cyan Blue
+                "#00ffaa",  # 4: NumPad / Neon Mint
+                "#ff0055",  # 5: Barra Frontal Izq
+                "#00d4ff",  # 6: Barra Frontal Der
+                "#aa00ff"   # 7: Logo Trasero Pantalla
+            ]
+            self.aura_ctrl.set_multi_static(cyberpunk_colors)
+            self.switch_sync.handler_block_by_func(self.on_sync_switched)
+            self.switch_sync.set_active(False)
+            self.switch_sync.handler_unblock_by_func(self.on_sync_switched)
+        elif preset_name == "blue":
+            self.aura_ctrl.set_single_static("#0088ff")
+        elif preset_name == "green":
+            self.aura_ctrl.set_single_static("#00ff00")
+        elif preset_name == "white":
+            self.aura_ctrl.set_single_static("#ffffff")
+        elif preset_name == "cyan":
+            self.aura_ctrl.set_single_static("#00ffff")
+        elif preset_name == "rainbow":
+            self.aura_ctrl.set_mode("rainbow", speed=2)
+        elif preset_name == "cycle":
+            self.aura_ctrl.set_mode("colorcycle", speed=2)
+        elif preset_name == "breathing":
+            self.aura_ctrl.set_mode("breathing", speed=2, color1="#ff0000", color2="#000000")
+        elif preset_name == "off":
+            self.aura_ctrl.turn_off()
+            self.scale_brightness.set_value(0)
+            self.switch_stealth.set_active(True)
+            return
+
+        if self.scale_brightness.get_value() == 0:
+            self.scale_brightness.set_value(3)
+        self.switch_stealth.set_active(False)
+        self.refresh_zone_buttons_from_state()
+
+    def refresh_zone_buttons_from_state(self):
+        if not self.aura_ctrl or not hasattr(self, "zone_buttons"):
+            return
+        zones = self.aura_ctrl.state.get("zones", ["#ff0000"] * 7)
+        for i in range(min(len(zones), len(self.zone_buttons))):
+            rgba = Gdk.RGBA()
+            rgba.parse(zones[i])
+            self.zone_buttons[i].set_rgba(rgba)
 
     # --------------------------------------------------------------------------
     # PESTAÑA 3: SERVICIOS E INICIO AUTOMÁTICO
