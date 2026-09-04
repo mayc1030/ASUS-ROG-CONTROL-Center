@@ -15,15 +15,17 @@ echo "===================================================================="
 echo " 🛡️ INICIANDO BLINDAJE Y ESTABILIZACIÓN DEL SISTEMA (ASUS GL504GM)"
 echo "===================================================================="
 
-# 1. Blindar sensor magnético de la tapa
-echo "--> [1/4] Protegiendo pantalla contra falsas lecturas del sensor de tapa..."
+# 1. Blindar sensor magnético de la tapa y botón de encendido del teclado dañado
+echo "--> [1/4] Protegiendo pantalla y botón de encendido contra falsas pulsaciones..."
 mkdir -p /etc/systemd/logind.conf.d
 cat << 'LID' > /etc/systemd/logind.conf.d/ignore-lid.conf
 [Login]
 HandleLidSwitch=ignore
 HandleLidSwitchExternalPower=ignore
+HandlePowerKey=ignore
+HandlePowerKeyLongPress=poweroff
 LID
-echo "✔ Sensor de tapa configurado en modo 'ignore' (cero apagones involuntarios)."
+echo "✔ Sensor de tapa y botón de encendido blindados (cero apagones involuntarios)."
 
 # 2. Estabilización de bus PCIe y video Intel en GRUB
 echo "--> [2/4] Configurando estabilización de bus PCIe y gráficos en GRUB..."

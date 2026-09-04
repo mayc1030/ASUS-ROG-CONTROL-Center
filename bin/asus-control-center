@@ -1009,7 +1009,7 @@ class AsusControlCenter(Gtk.Window):
 
     def on_toggle_lid_protection(self, switch, state):
         if state:
-            cmd = f"echo -e '[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore' | sudo -n tee {LID_CONF} >/dev/null 2>&1 || pkexec bash -c 'mkdir -p /etc/systemd/logind.conf.d && echo -e \"[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore\" > {LID_CONF}'"
+            cmd = f"echo -e '[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore\\nHandlePowerKey=ignore\\nHandlePowerKeyLongPress=poweroff' | sudo -n tee {LID_CONF} >/dev/null 2>&1 || pkexec bash -c 'mkdir -p /etc/systemd/logind.conf.d && echo -e \"[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore\\nHandlePowerKey=ignore\\nHandlePowerKeyLongPress=poweroff\" > {LID_CONF}'"
         else:
             cmd = f"sudo -n rm -f {LID_CONF} 2>/dev/null || pkexec rm -f {LID_CONF}"
         subprocess.Popen(cmd, shell=True)
