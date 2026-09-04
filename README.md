@@ -12,10 +12,11 @@
 ## 📸 Características Principales
 
 * ❄️ **Control Térmico y Silencioso de Ventiladores:** Alterna entre perfiles de enfriamiento (*Silent*, *Balanced*, *Overboost/Turbo*) y elimina el bloqueo de ventiladores a 5.000+ RPM.
+* 🌈 **Control de Iluminación Aura RGB (Zonas y Pantalla Trasera):** Personaliza las 4 zonas del teclado de forma independiente, la barra de luz frontal y el logotipo ROG de la tapa de la pantalla (*Lid Logo*), además de regular el brillo o apagar todo al 100% (*Modo Stealth*).
 * ⚡ **Control de Intel Turbo Boost:** Domador de picos térmicos para el procesador **Intel Core i7-8750H**. Permite fijar la frecuencia a 2.2 GHz para trabajar fresco a 45°C o liberar los 4.1 GHz para gaming.
 * ⌨️ **Vigilante Inteligente de Teclado (Auto-Freeze):** Si el teclado integrado del portátil tiene teclas cruzadas por desgaste de matriz, el demonio silencia automáticamente el teclado interno al conectar un teclado externo (como el **ASUS ROG Falchion**) y lo reactiva al desconectarlo.
 * 🎮 **Optimización de NVIDIA GTX 1060:** Configura el modo *On-Demand* correcto para evitar que el controlador desconecte los sensores térmicos de la placa base.
-* 🖥️ **Interfaz Gráfica GTK3 (Dark Gamer Edition):** HUD en tiempo real con temperaturas, RPM de turbinas, selector visual de perfiles e interruptores de arranque automático.
+* 🖥️ **Interfaz Gráfica GTK3 (Dark Gamer Edition):** HUD en tiempo real con temperaturas, RPM de turbinas, selector de zonas Aura RGB, selector visual de perfiles e interruptores de arranque automático.
 * ⚙️ **Suite de Gestión de Servicios:** Habilita, deshabilita o reinstala todas las configuraciones del sistema con un solo clic.
 
 ---
@@ -60,15 +61,15 @@ asus-control-center
 ### Pestañas disponibles:
 1. **❄️ Ventiladores y Rendimiento:** Telemetría HUD en vivo (Temperatura CPU, Temperatura GPU, RPM Ventilador 1, RPM Ventilador 2, Frecuencia en MHz), botones de perfiles (Silencioso, Equilibrado, Turbo) e interruptor de Turbo Boost.
 2. **⌨️ Control de Teclado:** Estado visual del teclado del portátil (Congelado/Activo), botón de alternancia rápida y estado de detección del teclado externo.
-3. **⚙️ Servicios e Inicio Automático:** Interruptores para activar/desactivar del arranque del sistema el modo silencioso o el vigilante de teclado, selector de perfil NVIDIA y botón maestro de reinstalación.
-4. **📖 Guía para Otras Distros:** Manual técnico embebido con instrucciones para replicar la configuración en cualquier distribución Linux.
+3. **🌈 Iluminación Aura RGB:** Control independiente para las 4 zonas del teclado, sincronización del logotipo trasero de la pantalla (Lid Logo) y barra frontal, regulador de brillo maestro (0 a 3), interruptor de apagado total (Modo Stealth) y presets gamer de 1 solo clic.
+4. **⚙️ Servicios e Inicio Automático:** Interruptores para activar/desactivar del arranque del sistema el modo silencioso o el vigilante de teclado, selector de perfil NVIDIA y botón maestro de reinstalación.
+5. **📖 Guía para Otras Distros:** Manual técnico embebido con instrucciones para replicar la configuración en cualquier distribución Linux.
 
 ---
 
 ## 💻 Uso por Línea de Comandos (CLI)
 
-También dispones de la herramienta de consola **`asus-fan`**:
-
+### 1. Control de Ventiladores (`asus-fan`)
 ```bash
 # Ver estado actual de temperaturas, RPMs y perfiles
 asus-fan status
@@ -87,6 +88,53 @@ asus-fan turbo-boost off
 
 # Reactivar Turbo Boost (libera los 4.1 GHz para juegos)
 asus-fan turbo-boost on
+```
+
+### 2. Control de Iluminación Aura RGB (`asus-aura`)
+Control directo del hardware USB `0b05:1866` sin necesidad de `sudo` con arquitectura de **7 Zonas Independientes**:
+- Zonas 1 a 4: Teclado RGB (WASD, Centro-Izq, Centro-Der, NumPad)
+- Zonas 5 y 6: Barra Frontal Izquierda y Derecha
+- Zona 7: Logotipo ROG en la tapa de la pantalla (Lid Logo)
+
+```bash
+# Ver estado de iluminación, brillo y las 7 zonas actuales
+asus-aura status
+
+# Color estático global en todo el equipo (teclado + barra + logo)
+asus-aura static ff0000
+
+# Control independiente del logotipo ROG trasero (pantalla)
+asus-aura logo aa00ff
+
+# Control independiente de la barra frontal (1 o 2 colores)
+asus-aura lightbar 00ffff ff0055
+
+# Control directo de cualquier zona específica (1 a 7)
+asus-aura zone 1 ff0000          # Zona 1 (WASD) en rojo
+
+# Color independiente para las zonas (4 a 7 zonas)
+asus-aura multi ff0055 aa00ff 00d4ff 00ffaa ff0055 00d4ff aa00ff
+
+# Modos dinámicos
+asus-aura rainbow 2              # Modo Arcoíris dinámico (velocidad 1-3)
+asus-aura cycle 2                # Ciclo de colores continuo
+asus-aura breathing ff0000 0000ff 2  # Respiración entre 2 colores
+
+# Presets rápidos de color
+asus-aura red                    # Rojo ROG clásico
+asus-aura blue                   # Azul glacial (Ice Blue)
+asus-aura green                  # Verde Matrix
+asus-aura white                  # Blanco puro
+asus-aura cyberpunk              # Preset Cyberpunk completo (7 Zonas)
+
+# Control de brillo maestro (0: apagado, 1: bajo, 2: medio, 3: máximo)
+asus-aura brightness 2
+
+# Apagado total instantáneo (Modo Stealth / Nocturno)
+asus-aura off
+
+# Restaurar perfil guardado y encender de nuevo
+asus-aura on
 ```
 
 Para alternar el teclado del portátil manualmente:

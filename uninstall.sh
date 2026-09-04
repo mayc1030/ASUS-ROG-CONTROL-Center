@@ -29,6 +29,8 @@ rm -f "$USER_HOME/.config/systemd/user/auto-teclado.service"
 # Eliminar binarios
 rm -f /usr/local/bin/asus-control-center
 rm -f /usr/local/bin/asus-fan
+rm -f /usr/local/bin/asus-aura
+rm -f /usr/local/bin/asus_aura.py
 rm -f /usr/local/bin/auto-teclado-daemon
 rm -f /usr/local/bin/toggle-teclado-laptop
 

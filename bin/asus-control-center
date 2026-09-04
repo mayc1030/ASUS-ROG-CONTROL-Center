@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ASUS ROG Strix GL504GM Control Center (Dark Gamer Edition + Suite de Servicios)
-Permite monitorear, controlar y gestionar los servicios de inicio del sistema.
+Permite monitorear, controlar ventiladores, teclado, gráficos y protección de pantalla.
 """
 
 import gi
@@ -16,11 +16,12 @@ import glob
 ASUS_WMI = "/sys/devices/platform/asus-nb-wmi"
 TURBO_FILE = "/sys/devices/system/cpu/intel_pstate/no_turbo"
 BOOST_FILE = f"{ASUS_WMI}/fan_boost_mode"
+LID_CONF = "/etc/systemd/logind.conf.d/ignore-lid.conf"
 
 class AsusControlCenter(Gtk.Window):
     def __init__(self):
         super().__init__(title="ASUS ROG Strix Control Center")
-        self.set_default_size(840, 680)
+        self.set_default_size(840, 700)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(14)
         
@@ -64,7 +65,7 @@ class AsusControlCenter(Gtk.Window):
         self.notebook.append_page(self.create_services_tab(), Gtk.Label(label="⚙️ Servicios e Inicio Automático"))
         self.notebook.append_page(self.create_guide_tab(), Gtk.Label(label="📖 Guía para Otras Distros"))
 
-        # Actualización periódica
+        # Iniciar actualización periódica de telemetría (cada 2 segundos)
         GLib.timeout_add_seconds(2, self.update_telemetry)
         self.update_telemetry()
 
@@ -208,7 +209,7 @@ class AsusControlCenter(Gtk.Window):
         metrics_box.set_homogeneous(True)
 
         c1 = self.create_metric_card("🌡️ CPU TEMP", "lbl_cpu_temp", "-- °C", "Intel Core i7-8750H", "#38bdf8")
-        c2 = self.create_metric_card("🎮 GPU TEMP", "lbl_gpu_temp", "-- °C", "NVIDIA GTX 1060", "#34d399")
+        c2 = self.create_metric_card("🎮 GPU TEMP", "lbl_gpu_temp", "-- °C", "Tarjeta Gráfica", "#34d399")
         c3 = self.create_metric_card("🌀 VENTILADOR CPU", "lbl_fan1_rpm", "-- RPM", "Canal Automático", "#a78bfa")
         c4 = self.create_metric_card("🌀 VENTILADOR GPU", "lbl_fan2_rpm", "-- RPM", "Canal Automático", "#f472b6")
 
@@ -322,7 +323,6 @@ class AsusControlCenter(Gtk.Window):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         box.set_border_width(12)
 
-        # Teclado Interno
         k_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         k_card.get_style_context().add_class("card")
 
@@ -374,7 +374,7 @@ class AsusControlCenter(Gtk.Window):
         return box
 
     # --------------------------------------------------------------------------
-    # PESTAÑA 3: SERVICIOS E INICIO AUTOMÁTICO (SUITE DE CONFIGURACIÓN)
+    # PESTAÑA 3: SERVICIOS E INICIO AUTOMÁTICO
     # --------------------------------------------------------------------------
     def create_services_tab(self):
         scrolled = Gtk.ScrolledWindow()
@@ -383,13 +383,12 @@ class AsusControlCenter(Gtk.Window):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         box.set_border_width(12)
 
-        # Encabezado
         header_desc = Gtk.Label()
-        header_desc.set_markup("<span foreground='#9ca3af' font='11'>Gestiona los servicios de arranque automático del sistema. Puedes habilitar, deshabilitar o reinstalar todas las optimizaciones desde este panel.</span>")
+        header_desc.set_markup("<span foreground='#9ca3af' font='11'>Gestiona los servicios de arranque automático y estabilidad de la máquina. Puedes activar, desactivar o reinstalar todas las soluciones con un clic.</span>")
         header_desc.set_halign(Gtk.Align.START)
         box.pack_start(header_desc, False, False, 0)
 
-        # 1. Servicio de Ventiladores Silenciosos (asus-fan-fix.service)
+        # 1. Servicio de Ventiladores Silenciosos
         card1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card1.get_style_context().add_class("card")
         
@@ -416,7 +415,7 @@ class AsusControlCenter(Gtk.Window):
         card1.pack_start(self.lbl_fan_svc_status, False, False, 0)
         box.pack_start(card1, False, False, 0)
 
-        # 2. Servicio de Vigilancia de Teclado (auto-teclado.service)
+        # 2. Servicio de Vigilancia de Teclado
         card2 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card2.get_style_context().add_class("card")
 
@@ -443,36 +442,70 @@ class AsusControlCenter(Gtk.Window):
         card2.pack_start(self.lbl_kbd_svc_status, False, False, 0)
         box.pack_start(card2, False, False, 0)
 
-        # 3. Perfil de Tarjeta Gráfica NVIDIA (PRIME)
-        card3 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        # 3. Protección de Pantalla (Evitar que se apague sola)
+        card_lid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_lid.get_style_context().add_class("card")
+
+        clid_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        clid_info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        clid_title = Gtk.Label()
+        clid_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🛡️ Protección de Pantalla (Evitar que se apague sola)</span>")
+        clid_title.set_halign(Gtk.Align.START)
+        clid_sub = Gtk.Label()
+        clid_sub.set_markup("<span foreground='#9ca3af' font='10'>Ignora los pulsos erróneos del sensor magnético de la tapa para que la pantalla nunca se quede en negro.</span>")
+        clid_sub.set_halign(Gtk.Align.START)
+        clid_info.pack_start(clid_title, False, False, 0)
+        clid_info.pack_start(clid_sub, False, False, 0)
+        clid_top.pack_start(clid_info, True, True, 0)
+
+        self.switch_lid_protection = Gtk.Switch()
+        self.switch_lid_protection.set_valign(Gtk.Align.CENTER)
+        self.switch_lid_protection.connect("state-set", self.on_toggle_lid_protection)
+        clid_top.pack_end(self.switch_lid_protection, False, False, 0)
+        card_lid.pack_start(clid_top, False, False, 0)
+
+        self.lbl_lid_status = Gtk.Label()
+        self.lbl_lid_status.set_halign(Gtk.Align.START)
+        card_lid.pack_start(self.lbl_lid_status, False, False, 0)
+        box.pack_start(card_lid, False, False, 0)
+
+        # 4. Perfil de Tarjeta Gráfica (Intel / On-Demand / NVIDIA)
+        card3 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         card3.get_style_context().add_class("card")
 
         c3_title = Gtk.Label()
-        c3_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🎮 Perfil de la Tarjeta Gráfica NVIDIA GTX 1060 (PRIME)</span>")
+        c3_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🎮 Perfil de la Tarjeta Gráfica (PRIME)</span>")
         c3_title.set_halign(Gtk.Align.START)
         card3.pack_start(c3_title, False, False, 0)
 
         c3_desc = Gtk.Label()
-        c3_desc.set_markup("<span foreground='#9ca3af' font='10'>El modo <b>On-Demand</b> es el recomendado: mantiene la GPU suspendida a 0W y 45°C sin desincronizar los sensores.</span>")
+        c3_desc.set_markup("<span foreground='#9ca3af' font='10'>• <b>Intel:</b> Máxima estabilidad, temperatura de 40°C y cero pantallas negras (Recomendado).\n• <b>On-Demand:</b> Híbrido inteligente.\n• <b>NVIDIA:</b> Máxima potencia continua para juegos pesados.</span>")
         c3_desc.set_halign(Gtk.Align.START)
         card3.pack_start(c3_desc, False, False, 0)
 
-        c3_btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        c3_status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.lbl_prime_status = Gtk.Label()
         self.lbl_prime_status.set_halign(Gtk.Align.START)
-        c3_btns.pack_start(self.lbl_prime_status, True, True, 0)
+        c3_status_box.pack_start(self.lbl_prime_status, True, True, 0)
+        card3.pack_start(c3_status_box, False, False, 0)
 
-        btn_prime_ondemand = Gtk.Button(label="Activar Modo On-Demand (Recomendado)")
-        btn_prime_ondemand.connect("clicked", lambda b: self.set_prime_mode("on-demand"))
-        btn_prime_nvidia = Gtk.Button(label="Activar NVIDIA al 100%")
-        btn_prime_nvidia.connect("clicked", lambda b: self.set_prime_mode("nvidia"))
+        c3_btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        c3_btns.set_homogeneous(True)
 
-        c3_btns.pack_end(btn_prime_nvidia, False, False, 0)
-        c3_btns.pack_end(btn_prime_ondemand, False, False, 0)
+        btn_intel = Gtk.Button(label="🟢 Activar Intel\n(Ultra Estabilidad)")
+        btn_intel.connect("clicked", lambda b: self.set_prime_mode("intel"))
+        btn_ondemand = Gtk.Button(label="🔵 Activar On-Demand\n(Híbrido)")
+        btn_ondemand.connect("clicked", lambda b: self.set_prime_mode("on-demand"))
+        btn_nvidia = Gtk.Button(label="🔴 Activar NVIDIA\n(100% Juegos)")
+        btn_nvidia.connect("clicked", lambda b: self.set_prime_mode("nvidia"))
+
+        c3_btns.pack_start(btn_intel, True, True, 0)
+        c3_btns.pack_start(btn_ondemand, True, True, 0)
+        c3_btns.pack_start(btn_nvidia, True, True, 0)
         card3.pack_start(c3_btns, False, False, 0)
         box.pack_start(card3, False, False, 0)
 
-        # 4. Botón Maestro de Instalación / Reinstalación
+        # 5. Botón Maestro de Instalación / Reinstalación
         master_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         master_card.get_style_context().add_class("card")
 
@@ -534,7 +567,7 @@ class AsusControlCenter(Gtk.Window):
         return box
 
     # --------------------------------------------------------------------------
-    # LÓGICA DE SERVICIOS Y EVENTOS
+    # LÓGICA DE EVENTOS
     # --------------------------------------------------------------------------
     def on_toggle_fan_service(self, switch, state):
         cmd = "enable --now" if state else "disable --now"
@@ -549,6 +582,15 @@ class AsusControlCenter(Gtk.Window):
         GLib.timeout_add(1000, self.update_telemetry)
         return False
 
+    def on_toggle_lid_protection(self, switch, state):
+        if state:
+            cmd = f"echo -e '[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore' | sudo -n tee {LID_CONF} >/dev/null 2>&1 || pkexec bash -c 'mkdir -p /etc/systemd/logind.conf.d && echo -e \"[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore\" > {LID_CONF}'"
+        else:
+            cmd = f"sudo -n rm -f {LID_CONF} 2>/dev/null || pkexec rm -f {LID_CONF}"
+        subprocess.Popen(cmd, shell=True)
+        GLib.timeout_add(1000, self.update_telemetry)
+        return False
+
     def set_prime_mode(self, mode):
         full_cmd = f"sudo -n prime-select {mode} 2>/dev/null || pkexec prime-select {mode}"
         subprocess.Popen(full_cmd, shell=True)
@@ -557,9 +599,9 @@ class AsusControlCenter(Gtk.Window):
             flags=0,
             message_type=Gtk.MessageType.INFO,
             buttons=Gtk.ButtonsType.OK,
-            text=f"Modo NVIDIA '{mode}' Aplicado"
+            text=f"Modo Gráfico '{mode.upper()}' Aplicado"
         )
-        dialog.format_secondary_text("Para que el cambio de controlador gráfico surta efecto completo, debes reiniciar el equipo.")
+        dialog.format_secondary_text("Para que el cambio de controlador surta efecto, debes reiniciar el equipo.")
         dialog.run()
         dialog.destroy()
         self.update_telemetry()
@@ -578,7 +620,7 @@ class AsusControlCenter(Gtk.Window):
                 buttons=Gtk.ButtonsType.OK,
                 text="¡Reinstalación Completada!"
             )
-            dialog.format_secondary_text("Todos los servicios de arranque automático, permisos y herramientas han sido instalados y configurados con éxito.")
+            dialog.format_secondary_text("Todos los servicios, configuraciones, permisos y accesos directos han sido restaurados con éxito.")
             dialog.run()
             dialog.destroy()
             self.update_telemetry()
@@ -595,13 +637,21 @@ class AsusControlCenter(Gtk.Window):
         except: pass
         self.lbl_cpu_temp.set_markup(f"<span foreground='#38bdf8' font='20' weight='heavy'>{cpu_t}</span>")
 
-        # 2. GPU Temp
-        gpu_t = "N/D"
+        # 2. GPU Temp / Modo Intel
+        prime_val = "intel"
         try:
-            out = subprocess.check_output("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader", shell=True, text=True, stderr=subprocess.DEVNULL)
-            gpu_t = f"+{out.strip()}.0°C"
+            prime_val = subprocess.check_output("prime-select query 2>/dev/null || echo intel", shell=True, text=True).strip()
         except: pass
-        self.lbl_gpu_temp.set_markup(f"<span foreground='#34d399' font='20' weight='heavy'>{gpu_t}</span>")
+
+        if prime_val == "intel":
+            self.lbl_gpu_temp.set_markup("<span foreground='#34d399' font='14' weight='bold'>STANDBY (0W)</span>")
+        else:
+            gpu_t = "N/D"
+            try:
+                out = subprocess.check_output("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader", shell=True, text=True, stderr=subprocess.DEVNULL)
+                gpu_t = f"+{out.strip()}.0°C"
+            except: pass
+            self.lbl_gpu_temp.set_markup(f"<span foreground='#34d399' font='20' weight='heavy'>{gpu_t}</span>")
 
         # 3. Fans
         hw_list = glob.glob(f"{ASUS_WMI}/hwmon/hwmon*")
@@ -689,7 +739,7 @@ class AsusControlCenter(Gtk.Window):
                 self.lbl_daemon_info.set_markup("<span foreground='#ef4444' font='10'>🛡️ Servicio automático detenido.</span>")
         except: pass
 
-        # 8. Telemetría de Servicios (Pestaña 3)
+        # 8. Servicios (Pestaña 3)
         try:
             # Fan service
             fan_svc_enabled = subprocess.call("systemctl is-enabled asus-fan-fix.service", shell=True, stdout=subprocess.DEVNULL) == 0
@@ -719,9 +769,20 @@ class AsusControlCenter(Gtk.Window):
             else:
                 self.lbl_kbd_svc_status.set_markup("<span foreground='#9ca3af'>○ <b>Estado:</b> DESHABILITADO.</span>")
 
+            # Lid protection
+            lid_protected = os.path.exists(LID_CONF)
+            self.switch_lid_protection.handler_block_by_func(self.on_toggle_lid_protection)
+            self.switch_lid_protection.set_active(lid_protected)
+            self.switch_lid_protection.handler_unblock_by_func(self.on_toggle_lid_protection)
+
+            if lid_protected:
+                self.lbl_lid_status.set_markup("<span foreground='#34d399'>● <b>Protección Activa:</b> La pantalla nunca se apagará por falso contacto de la tapa.</span>")
+            else:
+                self.lbl_lid_status.set_markup("<span foreground='#f59e0b'>○ <b>Protección Inactiva:</b> La pantalla puede apagarse si el sensor magnético detecta cierre.</span>")
+
             # Prime status
-            prime_val = subprocess.check_output("prime-select query 2>/dev/null || echo desconocido", shell=True, text=True).strip()
-            self.lbl_prime_status.set_markup(f"<span foreground='#ffffff'><b>Modo Actual:</b> <span foreground='#38bdf8'>{prime_val.upper()}</span></span>")
+            mode_color = "#34d399" if prime_val == "intel" else ("#38bdf8" if prime_val == "on-demand" else "#ef4444")
+            self.lbl_prime_status.set_markup(f"<span foreground='#ffffff'><b>Modo Actual:</b> <span foreground='{mode_color}' weight='bold'>{prime_val.upper()}</span></span>")
         except: pass
 
         return True
@@ -808,17 +869,22 @@ El i7-8750H vuela a 2.2 GHz de base. Para trabajar fresco a 45°C sin ruido:
 Para volver a activar toda la potencia a 4.1 GHz cuando vayas a jugar:
   echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
 
-5. CONFIGURACIÓN CORRECTA DE LA GRÁFICA NVIDIA (GTX 1060)
+5. CONFIGURACIÓN CORRECTA DE LA GRÁFICA (INTEL VS NVIDIA)
 --------------------------------------------------------------------------------
-NO uses 'prime-select intel' porque descalibra los sensores de la placa ASUS.
-Usa siempre modo ON-DEMAND:
-  sudo prime-select on-demand
+Para máxima estabilidad en el día a día (0W de consumo y cero pantallas negras):
+  sudo prime-select intel
   sudo reboot
 
-En Arch o Fedora, instala 'switcheroo-control' o usa PRIME Offload nativo.
-La GPU permanecerá suspendida en 0W (D3cold) mientras no juegues, con sensores activos.
+Para jugar o aplicaciones 3D intensivas:
+  sudo prime-select on-demand  (o 'nvidia' para máxima potencia continua)
 
-6. TECLADO INTERNO DAÑADO (CRUCE DE MATRIZ Y CÓMO APAGARLO)
+6. PROTECCIÓN CONTRA APAGADOS DE PANTALLA (SENSOR DE TAPA FALSO)
+--------------------------------------------------------------------------------
+Si la pantalla se apaga sola de la nada, se debe a falsas lecturas del sensor magnético.
+Para obligar a Linux a ignorar la tapa y que la pantalla no se apague nunca:
+  echo -e "[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore" | sudo tee /etc/systemd/logind.conf.d/ignore-lid.conf
+
+7. TECLADO INTERNO DAÑADO (CRUCE DE MATRIZ Y CÓMO APAGARLO)
 --------------------------------------------------------------------------------
 En este portátil, el teclado integrado Aura Sync se comunica por un puerto USB
 interno ('ASUS N-KEY Device', ID 0b05:1866), NO por PS/2 tradicional.
@@ -831,7 +897,7 @@ Para volver a encenderlo:
   xinput list | grep "Asus Keyboard" | grep -o 'id=[0-9]*' | cut -d= -f2 | while read id; do xinput enable $id; done
   xinput enable "AT Translated Set 2 keyboard" 2>/dev/null || true
 
-7. MANTENIMIENTO FÍSICO
+8. MANTENIMIENTO FÍSICO
 --------------------------------------------------------------------------------
 • Modelo exacto de batería de repuesto: C41N1727 (15.4V / 66Wh).
 • Pasta térmica recomendada para portátiles gamer con contacto directo de silicio:

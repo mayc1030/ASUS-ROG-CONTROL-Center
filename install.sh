@@ -24,13 +24,15 @@ echo "=========================================================="
 echo "--> [1/5] Instalando binarios en /usr/local/bin..."
 cp "$DIR/bin/asus-control-center" /usr/local/bin/asus-control-center
 cp "$DIR/bin/asus-fan" /usr/local/bin/asus-fan
+cp "$DIR/bin/asus-aura" /usr/local/bin/asus-aura
+cp "$DIR/bin/asus_aura.py" /usr/local/bin/asus_aura.py
 cp "$DIR/bin/auto-teclado-daemon" /usr/local/bin/auto-teclado-daemon
 cp "$DIR/bin/toggle-teclado-laptop" /usr/local/bin/toggle-teclado-laptop
-chmod 755 /usr/local/bin/asus-control-center /usr/local/bin/asus-fan /usr/local/bin/auto-teclado-daemon /usr/local/bin/toggle-teclado-laptop
+chmod 755 /usr/local/bin/asus-control-center /usr/local/bin/asus-fan /usr/local/bin/asus-aura /usr/local/bin/asus_aura.py /usr/local/bin/auto-teclado-daemon /usr/local/bin/toggle-teclado-laptop
 
-# 2. Configurar permisos sudoers sin contraseña para el control de perfiles
-echo "--> [2/5] Configurando permisos sudoers para cambios instantáneos de ventilación..."
-echo "$REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/asus-fan" > /etc/sudoers.d/asus-fan-control
+# 2. Configurar permisos sudoers sin contraseña para el control de perfiles e iluminación
+echo "--> [2/5] Configurando permisos sudoers para cambios instantáneos de ventilación e iluminación..."
+echo "$REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/asus-fan, /usr/local/bin/asus-aura" > /etc/sudoers.d/asus-fan-control
 chmod 440 /etc/sudoers.d/asus-fan-control
 
 # 3. Instalar servicio de ventiladores del sistema
@@ -73,6 +75,13 @@ fi
 
 echo ""
 echo "=========================================================="
+
+# 6. Configurar protección de pantalla contra falsos positivos de la tapa
+echo "--> [6/6] Configurando protección de pantalla (ignorar sensor de tapa)..."
+mkdir -p /etc/systemd/logind.conf.d
+echo -e "[Login]\nHandleLidSwitch=ignore\nHandleLidSwitchExternalPower=ignore" > /etc/systemd/logind.conf.d/ignore-lid.conf
+systemctl reload systemd-logind 2>/dev/null || true
+
 echo " ✔ ¡Instalación completada con éxito!"
 echo " Puedes abrir la aplicación desde:"
 echo "   1. Tu Escritorio: 'ASUS ROG Control Center'"
