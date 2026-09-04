@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+import subprocess, re, sys
+
+def get_internal_devices():
+    out = subprocess.check_output("xinput list", shell=True, text=True)
+    internal_ids = []
+    is_disabled = True
+    for line in out.splitlines():
+        if ("Asus Keyboard" in line or "AT Translated Set 2 keyboard" in line) and "FALCHION" not in line and "CHAKRAM" not in line:
+            m = re.search(r"id=(\d+)", line)
+            if m:
+                dev_id = m.group(1)
+                internal_ids.append(dev_id)
+                if "[slave" in line:
+                    is_disabled = False
+    return internal_ids, is_disabled
+
+internal_ids, is_disabled = get_internal_devices()
+
+if is_disabled:
+    # Está desactivado -> ACTIVAR
+    for dev_id in internal_ids:
+        subprocess.run(["xinput", "enable", dev_id], stderr=subprocess.DEVNULL)
+    subprocess.run(["notify-send", "-i", "input-keyboard", "Teclado del Portátil", "🟢 ACTIVADO\nEl teclado interno vuelve a funcionar."], stderr=subprocess.DEVNULL)
+    print("Teclado interno ACTIVADO")
+else:
+    # Está activado -> DESACTIVAR
+    for dev_id in internal_ids:
+        subprocess.run(["xinput", "disable", dev_id], stderr=subprocess.DEVNULL)
+    subprocess.run(["notify-send", "-i", "input-keyboard", "Teclado del Portátil", "🔴 DESACTIVADO\nEl teclado interno ha sido congelado."], stderr=subprocess.DEVNULL)
+    print("Teclado interno DESACTIVADO")

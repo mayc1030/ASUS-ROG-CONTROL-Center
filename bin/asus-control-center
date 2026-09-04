@@ -1,0 +1,846 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ASUS ROG Strix GL504GM Control Center (Dark Gamer Edition + Suite de Servicios)
+Permite monitorear, controlar y gestionar los servicios de inicio del sistema.
+"""
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GLib, Gdk, Pango
+import subprocess
+import os
+import re
+import glob
+
+ASUS_WMI = "/sys/devices/platform/asus-nb-wmi"
+TURBO_FILE = "/sys/devices/system/cpu/intel_pstate/no_turbo"
+BOOST_FILE = f"{ASUS_WMI}/fan_boost_mode"
+
+class AsusControlCenter(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="ASUS ROG Strix Control Center")
+        self.set_default_size(840, 680)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_border_width(14)
+        
+        self.apply_dark_theme()
+
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.add(main_box)
+
+        # 1. HEADER (Estilo ROG Republic of Gamers)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+        header.get_style_context().add_class("header-bar")
+
+        logo_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title_lbl = Gtk.Label()
+        title_lbl.set_markup("<span font='18' weight='heavy' foreground='#ff2a44'>ROG</span> <span font='18' weight='bold' foreground='#ffffff'>STRIX CONTROL</span>")
+        title_lbl.set_halign(Gtk.Align.START)
+        
+        sub_lbl = Gtk.Label()
+        sub_lbl.set_markup("<span foreground='#9ca3af' font='10'>ASUS GL504GM • Intel i7-8750H • GTX 1060 • Linux Gaming Hub</span>")
+        sub_lbl.set_halign(Gtk.Align.START)
+        
+        logo_box.pack_start(title_lbl, False, False, 0)
+        logo_box.pack_start(sub_lbl, False, False, 0)
+        header.pack_start(logo_box, False, False, 0)
+
+        # Badge indicador rápido
+        self.badge_status = Gtk.Label()
+        self.badge_status.set_markup("<span background='#065f46' foreground='#34d399' weight='bold' font='10'>  ● MODO SILENCIOSO ACTIVO  </span>")
+        self.badge_status.set_valign(Gtk.Align.CENTER)
+        header.pack_end(self.badge_status, False, False, 0)
+
+        main_box.pack_start(header, False, False, 0)
+
+        # 2. NOTEBOOK CON PESTAÑAS
+        self.notebook = Gtk.Notebook()
+        main_box.pack_start(self.notebook, True, True, 0)
+
+        # Pestañas
+        self.notebook.append_page(self.create_fans_tab(), Gtk.Label(label="❄️ Ventiladores y Rendimiento"))
+        self.notebook.append_page(self.create_keyboard_tab(), Gtk.Label(label="⌨️ Control de Teclado"))
+        self.notebook.append_page(self.create_services_tab(), Gtk.Label(label="⚙️ Servicios e Inicio Automático"))
+        self.notebook.append_page(self.create_guide_tab(), Gtk.Label(label="📖 Guía para Otras Distros"))
+
+        # Actualización periódica
+        GLib.timeout_add_seconds(2, self.update_telemetry)
+        self.update_telemetry()
+
+    def apply_dark_theme(self):
+        css_provider = Gtk.CssProvider()
+        css = """
+        window {
+            background-color: #0f1013;
+            color: #f3f4f6;
+        }
+
+        .header-bar {
+            background-color: #18191e;
+            border-radius: 10px;
+            padding: 12px 16px;
+            border: 1px solid #282a32;
+        }
+
+        notebook {
+            background-color: #131418;
+            border: none;
+        }
+
+        notebook tab {
+            background-color: #181a20;
+            color: #9ca3af;
+            padding: 10px 18px;
+            font-weight: bold;
+            font-size: 13px;
+            border: none;
+            border-bottom: 3px solid transparent;
+        }
+
+        notebook tab:checked {
+            background-color: #20232b;
+            color: #ff334b;
+            border-bottom: 3px solid #ff334b;
+        }
+
+        .card {
+            background-color: #191b22;
+            border-radius: 10px;
+            border: 1px solid #282b36;
+            padding: 14px;
+        }
+
+        .metric-card {
+            background-color: #121318;
+            border-radius: 8px;
+            border: 1px solid #232630;
+            padding: 12px;
+        }
+
+        .btn-profile {
+            border-radius: 8px;
+            padding: 12px;
+            border: 2px solid #2e323e;
+            background-color: #181a20;
+            color: #e5e7eb;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .btn-profile:hover {
+            background-color: #262934;
+            border-color: #4b5265;
+        }
+
+        .btn-profile.active-silent {
+            background-color: #064e3b;
+            border-color: #10b981;
+            color: #ffffff;
+        }
+
+        .btn-profile.active-balanced {
+            background-color: #1e3a8a;
+            border-color: #3b82f6;
+            color: #ffffff;
+        }
+
+        .btn-profile.active-turbo {
+            background-color: #7f1d1d;
+            border-color: #ef4444;
+            color: #ffffff;
+        }
+
+        .btn-action-green {
+            background-color: #059669;
+            color: white;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px 16px;
+            border: none;
+        }
+
+        .btn-action-red {
+            background-color: #dc2626;
+            color: white;
+            font-weight: bold;
+            border-radius: 8px;
+            padding: 10px 16px;
+            border: none;
+        }
+
+        .btn-master-install {
+            background: linear-gradient(135deg, #b91c1c, #dc2626);
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            border-radius: 10px;
+            padding: 14px 20px;
+            border: 1px solid #ef4444;
+        }
+        .btn-master-install:hover {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+        }
+
+        textview text {
+            background-color: #12141a;
+            color: #e2e8f0;
+            font-family: 'Ubuntu Mono', 'Monospace', monospace;
+            font-size: 12px;
+        }
+        """
+        css_provider.load_from_data(css.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+    # --------------------------------------------------------------------------
+    # PESTAÑA 1: VENTILADORES Y RENDIMIENTO
+    # --------------------------------------------------------------------------
+    def create_fans_tab(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.set_border_width(12)
+
+        # 1. Cuadrícula HUD
+        metrics_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        metrics_box.set_homogeneous(True)
+
+        c1 = self.create_metric_card("🌡️ CPU TEMP", "lbl_cpu_temp", "-- °C", "Intel Core i7-8750H", "#38bdf8")
+        c2 = self.create_metric_card("🎮 GPU TEMP", "lbl_gpu_temp", "-- °C", "NVIDIA GTX 1060", "#34d399")
+        c3 = self.create_metric_card("🌀 VENTILADOR CPU", "lbl_fan1_rpm", "-- RPM", "Canal Automático", "#a78bfa")
+        c4 = self.create_metric_card("🌀 VENTILADOR GPU", "lbl_fan2_rpm", "-- RPM", "Canal Automático", "#f472b6")
+
+        metrics_box.pack_start(c1, True, True, 0)
+        metrics_box.pack_start(c2, True, True, 0)
+        metrics_box.pack_start(c3, True, True, 0)
+        metrics_box.pack_start(c4, True, True, 0)
+        box.pack_start(metrics_box, False, False, 0)
+
+        # Frecuencia
+        freq_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lbl_freq_desc = Gtk.Label()
+        lbl_freq_desc.set_markup("<span foreground='#9ca3af' font='11'>⚡ Frecuencia en tiempo real:</span>")
+        self.lbl_cpu_freq = Gtk.Label()
+        self.lbl_cpu_freq.set_markup("<span foreground='#ffffff' weight='bold' font='11'>-- MHz</span>")
+        freq_box.pack_start(lbl_freq_desc, False, False, 0)
+        freq_box.pack_start(self.lbl_cpu_freq, False, False, 0)
+        box.pack_start(freq_box, False, False, 0)
+
+        # 2. Perfiles ASUS
+        profiles_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        profiles_card.get_style_context().add_class("card")
+
+        p_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        p_title = Gtk.Label()
+        p_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>Perfiles de Enfriamiento ASUS (Fn + F5)</span>")
+        self.lbl_current_p = Gtk.Label()
+        p_header.pack_start(p_title, False, False, 0)
+        p_header.pack_end(self.lbl_current_p, False, False, 0)
+        profiles_card.pack_start(p_header, False, False, 0)
+
+        btns_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        btns_box.set_homogeneous(True)
+
+        self.btn_silent = Gtk.Button()
+        self.btn_silent.get_style_context().add_class("btn-profile")
+        lbl_s = Gtk.Label()
+        lbl_s.set_markup("<span font='13'>🍃 <b>SILENCIOSO</b></span>\n<span font='10' foreground='#9ca3af'>Para trabajar, navegar y estudiar.\nCurva suave y mínimo ruido.</span>")
+        self.btn_silent.add(lbl_s)
+        self.btn_silent.connect("clicked", lambda b: self.set_profile(2))
+        btns_box.pack_start(self.btn_silent, True, True, 0)
+
+        self.btn_balanced = Gtk.Button()
+        self.btn_balanced.get_style_context().add_class("btn-profile")
+        lbl_b = Gtk.Label()
+        lbl_b.set_markup("<span font='13'>⚖️ <b>EQUILIBRADO</b></span>\n<span font='10' foreground='#9ca3af'>Modo estándar de fábrica.\nRespuesta térmica normal.</span>")
+        self.btn_balanced.add(lbl_b)
+        self.btn_balanced.connect("clicked", lambda b: self.set_profile(0))
+        btns_box.pack_start(self.btn_balanced, True, True, 0)
+
+        self.btn_turbo = Gtk.Button()
+        self.btn_turbo.get_style_context().add_class("btn-profile")
+        lbl_t = Gtk.Label()
+        lbl_t.set_markup("<span font='13'>🔥 <b>OVERBOOST</b></span>\n<span font='10' foreground='#9ca3af'>Para juegos pesados y renders.\nMáxima velocidad de ventilación.</span>")
+        self.btn_turbo.add(lbl_t)
+        self.btn_turbo.connect("clicked", lambda b: self.set_profile(1))
+        btns_box.pack_start(self.btn_turbo, True, True, 0)
+
+        profiles_card.pack_start(btns_box, False, False, 0)
+        box.pack_start(profiles_card, False, False, 0)
+
+        # 3. Intel Turbo Boost
+        turbo_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+        turbo_card.get_style_context().add_class("card")
+
+        turbo_info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        turbo_title = Gtk.Label()
+        turbo_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🚀 Intel Turbo Boost (Picos Térmicos a 4.1 GHz)</span>")
+        turbo_title.set_halign(Gtk.Align.START)
+        
+        self.turbo_desc = Gtk.Label()
+        self.turbo_desc.set_halign(Gtk.Align.START)
+        turbo_info.pack_start(turbo_title, False, False, 0)
+        turbo_info.pack_start(self.turbo_desc, False, False, 0)
+        turbo_card.pack_start(turbo_info, True, True, 0)
+
+        self.turbo_switch = Gtk.Switch()
+        self.turbo_switch.set_valign(Gtk.Align.CENTER)
+        self.turbo_switch.connect("state-set", self.on_turbo_switched)
+        turbo_card.pack_end(self.turbo_switch, False, False, 0)
+
+        box.pack_start(turbo_card, False, False, 0)
+        return box
+
+    def create_metric_card(self, title, attr_name, default_val, sub_text, color):
+        c = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        c.get_style_context().add_class("metric-card")
+
+        t = Gtk.Label()
+        t.set_markup(f"<span foreground='#9ca3af' font='10' weight='bold'>{title}</span>")
+        t.set_halign(Gtk.Align.START)
+
+        val = Gtk.Label()
+        val.set_markup(f"<span foreground='{color}' font='20' weight='heavy'>{default_val}</span>")
+        val.set_halign(Gtk.Align.START)
+        setattr(self, attr_name, val)
+
+        sub = Gtk.Label()
+        sub.set_markup(f"<span foreground='#6b7280' font='9'>{sub_text}</span>")
+        sub.set_halign(Gtk.Align.START)
+
+        c.pack_start(t, False, False, 0)
+        c.pack_start(val, False, False, 0)
+        c.pack_start(sub, False, False, 0)
+        return c
+
+    # --------------------------------------------------------------------------
+    # PESTAÑA 2: CONTROL DE TECLADO
+    # --------------------------------------------------------------------------
+    def create_keyboard_tab(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.set_border_width(12)
+
+        # Teclado Interno
+        k_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        k_card.get_style_context().add_class("card")
+
+        k_title = Gtk.Label()
+        k_title.set_markup("<span foreground='#ffffff' weight='bold' font='13'>⌨️ Teclado Integrado del Portátil (ASUS N-KEY)</span>")
+        k_title.set_halign(Gtk.Align.START)
+        k_card.pack_start(k_title, False, False, 0)
+
+        self.k_status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+        self.lbl_k_state = Gtk.Label()
+        self.lbl_k_state.set_halign(Gtk.Align.START)
+        self.k_status_box.pack_start(self.lbl_k_state, True, True, 0)
+
+        self.btn_k_action = Gtk.Button()
+        self.btn_k_action.connect("clicked", self.on_toggle_keyboard)
+        self.k_status_box.pack_end(self.btn_k_action, False, False, 0)
+        k_card.pack_start(self.k_status_box, False, False, 0)
+
+        k_note = Gtk.Label()
+        k_note.set_markup(
+            "<span foreground='#9ca3af' font='10'>"
+            "• Al estar <b>DESACTIVADO</b>, las teclas internas no responden y evitan caracteres cruzados (1->7, q->m, a->j).\n"
+            "• El Touchpad y los botones externos siguen funcionando con total normalidad."
+            "</span>"
+        )
+        k_note.set_halign(Gtk.Align.START)
+        k_card.pack_start(k_note, False, False, 0)
+
+        box.pack_start(k_card, False, False, 0)
+
+        # Teclado Externo / Falchion
+        ext_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        ext_card.get_style_context().add_class("card")
+
+        ext_title = Gtk.Label()
+        ext_title.set_markup("<span foreground='#ffffff' weight='bold' font='13'>🔌 Teclado Externo ASUS ROG FALCHION</span>")
+        ext_title.set_halign(Gtk.Align.START)
+        ext_card.pack_start(ext_title, False, False, 0)
+
+        self.lbl_ext_info = Gtk.Label()
+        self.lbl_ext_info.set_halign(Gtk.Align.START)
+        ext_card.pack_start(self.lbl_ext_info, False, False, 0)
+
+        self.lbl_daemon_info = Gtk.Label()
+        self.lbl_daemon_info.set_halign(Gtk.Align.START)
+        ext_card.pack_start(self.lbl_daemon_info, False, False, 0)
+
+        box.pack_start(ext_card, False, False, 0)
+        return box
+
+    # --------------------------------------------------------------------------
+    # PESTAÑA 3: SERVICIOS E INICIO AUTOMÁTICO (SUITE DE CONFIGURACIÓN)
+    # --------------------------------------------------------------------------
+    def create_services_tab(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.set_border_width(12)
+
+        # Encabezado
+        header_desc = Gtk.Label()
+        header_desc.set_markup("<span foreground='#9ca3af' font='11'>Gestiona los servicios de arranque automático del sistema. Puedes habilitar, deshabilitar o reinstalar todas las optimizaciones desde este panel.</span>")
+        header_desc.set_halign(Gtk.Align.START)
+        box.pack_start(header_desc, False, False, 0)
+
+        # 1. Servicio de Ventiladores Silenciosos (asus-fan-fix.service)
+        card1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card1.get_style_context().add_class("card")
+        
+        c1_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        c1_info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        c1_title = Gtk.Label()
+        c1_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>❄️ Inicio Automático en Modo Silencioso (asus-fan-fix.service)</span>")
+        c1_title.set_halign(Gtk.Align.START)
+        c1_sub = Gtk.Label()
+        c1_sub.set_markup("<span foreground='#9ca3af' font='10'>Activa el modo Silent y corrige el ventilador GPU automáticamente cada vez que enciendes el PC.</span>")
+        c1_sub.set_halign(Gtk.Align.START)
+        c1_info.pack_start(c1_title, False, False, 0)
+        c1_info.pack_start(c1_sub, False, False, 0)
+        c1_top.pack_start(c1_info, True, True, 0)
+
+        self.switch_fan_service = Gtk.Switch()
+        self.switch_fan_service.set_valign(Gtk.Align.CENTER)
+        self.switch_fan_service.connect("state-set", self.on_toggle_fan_service)
+        c1_top.pack_end(self.switch_fan_service, False, False, 0)
+        card1.pack_start(c1_top, False, False, 0)
+
+        self.lbl_fan_svc_status = Gtk.Label()
+        self.lbl_fan_svc_status.set_halign(Gtk.Align.START)
+        card1.pack_start(self.lbl_fan_svc_status, False, False, 0)
+        box.pack_start(card1, False, False, 0)
+
+        # 2. Servicio de Vigilancia de Teclado (auto-teclado.service)
+        card2 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card2.get_style_context().add_class("card")
+
+        c2_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        c2_info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        c2_title = Gtk.Label()
+        c2_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>⌨️ Detector Inteligente de Teclado ROG Falchion (auto-teclado.service)</span>")
+        c2_title.set_halign(Gtk.Align.START)
+        c2_sub = Gtk.Label()
+        c2_sub.set_markup("<span foreground='#9ca3af' font='10'>Vigila en segundo plano y congela el teclado del portátil cuando conectas el Falchion.</span>")
+        c2_sub.set_halign(Gtk.Align.START)
+        c2_info.pack_start(c2_title, False, False, 0)
+        c2_info.pack_start(c2_sub, False, False, 0)
+        c2_top.pack_start(c2_info, True, True, 0)
+
+        self.switch_kbd_service = Gtk.Switch()
+        self.switch_kbd_service.set_valign(Gtk.Align.CENTER)
+        self.switch_kbd_service.connect("state-set", self.on_toggle_kbd_service)
+        c2_top.pack_end(self.switch_kbd_service, False, False, 0)
+        card2.pack_start(c2_top, False, False, 0)
+
+        self.lbl_kbd_svc_status = Gtk.Label()
+        self.lbl_kbd_svc_status.set_halign(Gtk.Align.START)
+        card2.pack_start(self.lbl_kbd_svc_status, False, False, 0)
+        box.pack_start(card2, False, False, 0)
+
+        # 3. Perfil de Tarjeta Gráfica NVIDIA (PRIME)
+        card3 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card3.get_style_context().add_class("card")
+
+        c3_title = Gtk.Label()
+        c3_title.set_markup("<span foreground='#ffffff' weight='bold' font='12'>🎮 Perfil de la Tarjeta Gráfica NVIDIA GTX 1060 (PRIME)</span>")
+        c3_title.set_halign(Gtk.Align.START)
+        card3.pack_start(c3_title, False, False, 0)
+
+        c3_desc = Gtk.Label()
+        c3_desc.set_markup("<span foreground='#9ca3af' font='10'>El modo <b>On-Demand</b> es el recomendado: mantiene la GPU suspendida a 0W y 45°C sin desincronizar los sensores.</span>")
+        c3_desc.set_halign(Gtk.Align.START)
+        card3.pack_start(c3_desc, False, False, 0)
+
+        c3_btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.lbl_prime_status = Gtk.Label()
+        self.lbl_prime_status.set_halign(Gtk.Align.START)
+        c3_btns.pack_start(self.lbl_prime_status, True, True, 0)
+
+        btn_prime_ondemand = Gtk.Button(label="Activar Modo On-Demand (Recomendado)")
+        btn_prime_ondemand.connect("clicked", lambda b: self.set_prime_mode("on-demand"))
+        btn_prime_nvidia = Gtk.Button(label="Activar NVIDIA al 100%")
+        btn_prime_nvidia.connect("clicked", lambda b: self.set_prime_mode("nvidia"))
+
+        c3_btns.pack_end(btn_prime_nvidia, False, False, 0)
+        c3_btns.pack_end(btn_prime_ondemand, False, False, 0)
+        card3.pack_start(c3_btns, False, False, 0)
+        box.pack_start(card3, False, False, 0)
+
+        # 4. Botón Maestro de Instalación / Reinstalación
+        master_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        master_card.get_style_context().add_class("card")
+
+        m_title = Gtk.Label()
+        m_title.set_markup("<span foreground='#ffffff' weight='bold' font='13'>🛠️ Taller de Reinstalación Rápida</span>")
+        m_title.set_halign(Gtk.Align.START)
+        m_desc = Gtk.Label()
+        m_desc.set_markup("<span foreground='#9ca3af' font='10'>¿Instalaste una nueva versión de Linux o se desconfiguró algo? Este botón reinstala los servicios, permisos sudoers, comandos en /usr/local/bin y lanzadores de escritorio en 1 solo paso.</span>")
+        m_desc.set_halign(Gtk.Align.START)
+        m_desc.set_line_wrap(True)
+
+        master_card.pack_start(m_title, False, False, 0)
+        master_card.pack_start(m_desc, False, False, 0)
+
+        btn_reinstall_all = Gtk.Button(label="🚀 Reinstalar y Aplicar Todo el Sistema de Fábrica")
+        btn_reinstall_all.get_style_context().add_class("btn-master-install")
+        btn_reinstall_all.connect("clicked", self.on_reinstall_all_clicked)
+        master_card.pack_start(btn_reinstall_all, False, False, 0)
+
+        box.pack_start(master_card, False, False, 0)
+
+        scrolled.add(box)
+        return scrolled
+
+    # --------------------------------------------------------------------------
+    # PESTAÑA 4: GUÍA PASO A PASO PARA OTRAS DISTROS
+    # --------------------------------------------------------------------------
+    def create_guide_tab(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_border_width(12)
+
+        top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        t_lbl = Gtk.Label()
+        t_lbl.set_markup("<span foreground='#ffffff' weight='bold' font='12'>Documentación Técnica para Replicar en Arch, Fedora, Debian, Mint</span>")
+        btn_copy = Gtk.Button(label="📋 Copiar Guía al Portapapeles")
+        btn_copy.connect("clicked", self.copy_guide)
+        top_bar.pack_start(t_lbl, False, False, 0)
+        top_bar.pack_end(btn_copy, False, False, 0)
+        box.pack_start(top_bar, False, False, 0)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_shadow_type(Gtk.ShadowType.IN)
+
+        self.text_view = Gtk.TextView()
+        self.text_view.set_editable(False)
+        self.text_view.set_cursor_visible(False)
+        self.text_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.text_view.set_left_margin(16)
+        self.text_view.set_right_margin(16)
+        self.text_view.set_top_margin(14)
+        self.text_view.set_bottom_margin(14)
+
+        buffer = self.text_view.get_buffer()
+        buffer.set_text(self.get_guide_content())
+
+        scrolled.add(self.text_view)
+        box.pack_start(scrolled, True, True, 0)
+        return box
+
+    # --------------------------------------------------------------------------
+    # LÓGICA DE SERVICIOS Y EVENTOS
+    # --------------------------------------------------------------------------
+    def on_toggle_fan_service(self, switch, state):
+        cmd = "enable --now" if state else "disable --now"
+        full_cmd = f"sudo -n systemctl {cmd} asus-fan-fix.service 2>/dev/null || pkexec systemctl {cmd} asus-fan-fix.service"
+        subprocess.Popen(full_cmd, shell=True)
+        GLib.timeout_add(1000, self.update_telemetry)
+        return False
+
+    def on_toggle_kbd_service(self, switch, state):
+        cmd = "enable --now" if state else "disable --now"
+        subprocess.run(f"systemctl --user {cmd} auto-teclado.service", shell=True)
+        GLib.timeout_add(1000, self.update_telemetry)
+        return False
+
+    def set_prime_mode(self, mode):
+        full_cmd = f"sudo -n prime-select {mode} 2>/dev/null || pkexec prime-select {mode}"
+        subprocess.Popen(full_cmd, shell=True)
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=f"Modo NVIDIA '{mode}' Aplicado"
+        )
+        dialog.format_secondary_text("Para que el cambio de controlador gráfico surta efecto completo, debes reiniciar el equipo.")
+        dialog.run()
+        dialog.destroy()
+        self.update_telemetry()
+
+    def on_reinstall_all_clicked(self, widget):
+        script_path = "/home/maycol/instalar-ventiladores.sh"
+        if os.path.exists(script_path):
+            cmd = f"sudo -n bash {script_path} 2>/dev/null || pkexec bash {script_path}"
+            p = subprocess.Popen(cmd, shell=True)
+            p.wait()
+            
+            dialog = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=Gtk.MessageType.INFO,
+                buttons=Gtk.ButtonsType.OK,
+                text="¡Reinstalación Completada!"
+            )
+            dialog.format_secondary_text("Todos los servicios de arranque automático, permisos y herramientas han sido instalados y configurados con éxito.")
+            dialog.run()
+            dialog.destroy()
+            self.update_telemetry()
+
+    def update_telemetry(self):
+        # 1. CPU Temp
+        cpu_t = "N/D"
+        try:
+            out = subprocess.check_output("sensors", shell=True, text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                if "Package id 0:" in line:
+                    cpu_t = line.split(":")[1].split("(")[0].strip()
+                    break
+        except: pass
+        self.lbl_cpu_temp.set_markup(f"<span foreground='#38bdf8' font='20' weight='heavy'>{cpu_t}</span>")
+
+        # 2. GPU Temp
+        gpu_t = "N/D"
+        try:
+            out = subprocess.check_output("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader", shell=True, text=True, stderr=subprocess.DEVNULL)
+            gpu_t = f"+{out.strip()}.0°C"
+        except: pass
+        self.lbl_gpu_temp.set_markup(f"<span foreground='#34d399' font='20' weight='heavy'>{gpu_t}</span>")
+
+        # 3. Fans
+        hw_list = glob.glob(f"{ASUS_WMI}/hwmon/hwmon*")
+        f1, f2 = "-- RPM", "-- RPM"
+        if hw_list:
+            hw = hw_list[0]
+            try: f1 = open(f"{hw}/fan1_input").read().strip() + " RPM"
+            except: pass
+            try: f2 = open(f"{hw}/fan2_input").read().strip() + " RPM"
+            except: pass
+        self.lbl_fan1_rpm.set_markup(f"<span foreground='#a78bfa' font='20' weight='heavy'>{f1}</span>")
+        self.lbl_fan2_rpm.set_markup(f"<span foreground='#f472b6' font='20' weight='heavy'>{f2}</span>")
+
+        # 4. Freq
+        try:
+            out = subprocess.check_output("awk '{sum+=$1; count++} END {printf \"%.0f MHz\", sum/count/1000}' /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq", shell=True, text=True)
+            self.lbl_cpu_freq.set_markup(f"<span foreground='#38bdf8' weight='bold'>{out.strip()}</span>")
+        except: pass
+
+        # 5. Perfil Activo
+        active_p = "0"
+        if os.path.exists(BOOST_FILE):
+            active_p = open(BOOST_FILE).read().strip()
+
+        for b, cls in [(self.btn_silent, "active-silent"), (self.btn_balanced, "active-balanced"), (self.btn_turbo, "active-turbo")]:
+            b.get_style_context().remove_class(cls)
+
+        if active_p == "2":
+            self.btn_silent.get_style_context().add_class("active-silent")
+            self.lbl_current_p.set_markup("<span foreground='#10b981' weight='bold'>● Perfil Activo: SILENCIOSO (2)</span>")
+            self.badge_status.set_markup("<span background='#065f46' foreground='#34d399' weight='bold' font='10'>  ● SILENCIOSO (2.2 GHz)  </span>")
+        elif active_p == "1":
+            self.btn_turbo.get_style_context().add_class("active-turbo")
+            self.lbl_current_p.set_markup("<span foreground='#ef4444' weight='bold'>● Perfil Activo: OVERBOOST / TURBO (1)</span>")
+            self.badge_status.set_markup("<span background='#7f1d1d' foreground='#fca5a5' weight='bold' font='10'>  ● MODO TURBO MÁXIMO  </span>")
+        else:
+            self.btn_balanced.get_style_context().add_class("active-balanced")
+            self.lbl_current_p.set_markup("<span foreground='#3b82f6' weight='bold'>● Perfil Activo: EQUILIBRADO (0)</span>")
+            self.badge_status.set_markup("<span background='#1e3a8a' foreground='#93c5fd' weight='bold' font='10'>  ● EQUILIBRADO (Normal)  </span>")
+
+        # 6. Turbo Switch
+        if os.path.exists(TURBO_FILE):
+            no_turbo = open(TURBO_FILE).read().strip() == "1"
+            self.turbo_switch.handler_block_by_func(self.on_turbo_switched)
+            self.turbo_switch.set_active(not no_turbo)
+            self.turbo_switch.handler_unblock_by_func(self.on_turbo_switched)
+
+            if no_turbo:
+                self.turbo_desc.set_markup("<span foreground='#34d399'><b>DESACTIVADO (Fresco y Silencioso):</b> El procesador se queda en 2.2 GHz sin calentarse.</span>")
+            else:
+                self.turbo_desc.set_markup("<span foreground='#f59e0b'><b>ACTIVADO (Máxima Potencia):</b> El procesador puede saltar hasta 4.1 GHz cuando juegues.</span>")
+
+        # 7. Teclado
+        try:
+            out = subprocess.check_output("xinput list", shell=True, text=True)
+            is_disabled = True
+            for line in out.splitlines():
+                if ("Asus Keyboard" in line or "AT Translated" in line) and "FALCHION" not in line and "CHAKRAM" not in line:
+                    if "[slave" in line:
+                        is_disabled = False
+                        break
+
+            self.btn_k_action.get_style_context().remove_class("btn-action-green")
+            self.btn_k_action.get_style_context().remove_class("btn-action-red")
+
+            if is_disabled:
+                self.lbl_k_state.set_markup("<span foreground='#ef4444' font='14' weight='bold'>🔴 DESACTIVADO (Congelado)</span>\n<span foreground='#9ca3af' font='10'>El teclado del portátil está en silencio para evitar teclas locas.</span>")
+                self.btn_k_action.set_label("🟢 Activar Teclado Interno")
+                self.btn_k_action.get_style_context().add_class("btn-action-green")
+            else:
+                self.lbl_k_state.set_markup("<span foreground='#10b981' font='14' weight='bold'>🟢 ACTIVADO (Operativo)</span>\n<span foreground='#9ca3af' font='10'>El teclado del portátil responde a todas las pulsaciones.</span>")
+                self.btn_k_action.set_label("🔴 Desactivar Teclado Interno")
+                self.btn_k_action.get_style_context().add_class("btn-action-red")
+
+            falchion = "ASUSTeK ROG FALCHION" in out
+            if falchion:
+                self.lbl_ext_info.set_markup("<span foreground='#34d399' font='11'>🟢 <b>Conectado:</b> ASUS ROG FALCHION detectado y listo.</span>")
+            else:
+                self.lbl_ext_info.set_markup("<span foreground='#6b7280' font='11'>⚪ Ningún teclado externo conectado actualmente.</span>")
+
+            daemon_active = subprocess.call("systemctl --user is-active auto-teclado.service", shell=True, stdout=subprocess.DEVNULL) == 0
+            if daemon_active:
+                self.lbl_daemon_info.set_markup("<span foreground='#9ca3af' font='10'>🛡️ <b>Servicio automático:</b> Activo (silencia el teclado del portátil cuando el Falchion está conectado).</span>")
+            else:
+                self.lbl_daemon_info.set_markup("<span foreground='#ef4444' font='10'>🛡️ Servicio automático detenido.</span>")
+        except: pass
+
+        # 8. Telemetría de Servicios (Pestaña 3)
+        try:
+            # Fan service
+            fan_svc_enabled = subprocess.call("systemctl is-enabled asus-fan-fix.service", shell=True, stdout=subprocess.DEVNULL) == 0
+            fan_svc_active = subprocess.call("systemctl is-active asus-fan-fix.service", shell=True, stdout=subprocess.DEVNULL) == 0
+            
+            self.switch_fan_service.handler_block_by_func(self.on_toggle_fan_service)
+            self.switch_fan_service.set_active(fan_svc_enabled)
+            self.switch_fan_service.handler_unblock_by_func(self.on_toggle_fan_service)
+
+            if fan_svc_enabled and fan_svc_active:
+                self.lbl_fan_svc_status.set_markup("<span foreground='#34d399'>● <b>Estado:</b> ACTIVO y HABILITADO al arranque del sistema.</span>")
+            elif fan_svc_enabled:
+                self.lbl_fan_svc_status.set_markup("<span foreground='#fbbf24'>● <b>Estado:</b> HABILITADO al arranque.</span>")
+            else:
+                self.lbl_fan_svc_status.set_markup("<span foreground='#9ca3af'>○ <b>Estado:</b> DESHABILITADO del arranque.</span>")
+
+            # Keyboard service
+            kbd_svc_enabled = subprocess.call("systemctl --user is-enabled auto-teclado.service", shell=True, stdout=subprocess.DEVNULL) == 0
+            kbd_svc_active = subprocess.call("systemctl --user is-active auto-teclado.service", shell=True, stdout=subprocess.DEVNULL) == 0
+
+            self.switch_kbd_service.handler_block_by_func(self.on_toggle_kbd_service)
+            self.switch_kbd_service.set_active(kbd_svc_enabled)
+            self.switch_kbd_service.handler_unblock_by_func(self.on_toggle_kbd_service)
+
+            if kbd_svc_enabled and kbd_svc_active:
+                self.lbl_kbd_svc_status.set_markup("<span foreground='#34d399'>● <b>Estado:</b> ACTIVO y HABILITADO en el inicio de sesión.</span>")
+            else:
+                self.lbl_kbd_svc_status.set_markup("<span foreground='#9ca3af'>○ <b>Estado:</b> DESHABILITADO.</span>")
+
+            # Prime status
+            prime_val = subprocess.check_output("prime-select query 2>/dev/null || echo desconocido", shell=True, text=True).strip()
+            self.lbl_prime_status.set_markup(f"<span foreground='#ffffff'><b>Modo Actual:</b> <span foreground='#38bdf8'>{prime_val.upper()}</span></span>")
+        except: pass
+
+        return True
+
+    def set_profile(self, mode):
+        name = "silent" if mode == 2 else ("turbo" if mode == 1 else "balanced")
+        cmd = f"sudo -n /usr/local/bin/asus-fan {name} 2>/dev/null || /home/maycol/.local/bin/asus-fan {name}"
+        subprocess.Popen(cmd, shell=True)
+        GLib.timeout_add(600, self.update_telemetry)
+
+    def on_turbo_switched(self, switch, state):
+        arg = "on" if state else "off"
+        cmd = f"sudo -n /usr/local/bin/asus-fan turbo-boost {arg} 2>/dev/null || /home/maycol/.local/bin/asus-fan turbo-boost {arg}"
+        subprocess.Popen(cmd, shell=True)
+        return False
+
+    def on_toggle_keyboard(self, widget):
+        subprocess.run("/home/maycol/.local/bin/toggle-teclado-laptop", shell=True)
+        self.update_telemetry()
+
+    def copy_guide(self, widget):
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(self.get_guide_content(), -1)
+        subprocess.run(["notify-send", "-i", "dialog-information", "ASUS Control Center", "Guía técnica copiada al portapapeles."])
+
+    def get_guide_content(self):
+        return """================================================================================
+GUÍA TÉCNICA MAESTRA: OPTIMIZACIÓN ASUS ROG STRIX GL504GM EN CUALQUIER LINUX
+Compatible con: Arch Linux, Fedora, Ubuntu, Debian, Manjaro, Pop!_OS, Linux Mint
+================================================================================
+
+1. EL PROBLEMA DE LOS VENTILADORES EN ESTE MODELO
+--------------------------------------------------------------------------------
+El ASUS ROG Strix GL504GM (Core i7-8750H + GTX 1060 Mobile) sufre de ventiladores
+a 5.000+ RPM de golpe debido a 3 causas:
+  1) El procesador i7-8750H tiene picos de Turbo Boost a 4.1 GHz que alcanzan
+     100°C en milisegundos durante tareas cotidianas (Thermal Throttling).
+  2) Al usar modo 'prime-select intel', el driver NVIDIA no comunica la temperatura
+     de la GPU a la BIOS/EC; como medida de seguridad, la placa base fuerza el
+     ventilador 2 (GPU) al 100% de potencia constante (pwm2_enable = 0).
+  3) El disipador de cobre es compartido entre CPU y GPU: el calor se transmite.
+
+2. CÓMO CONTROLAR LOS VENTILADORES EN CUALQUIER DISTRO
+--------------------------------------------------------------------------------
+El kernel de Linux incluye el módulo 'asus-nb-wmi', que controla la ventilación:
+Ruta: /sys/devices/platform/asus-nb-wmi/fan_boost_mode
+
+Valores admitidos:
+  • 0 = Normal / Equilibrado (Curva estándar)
+  • 1 = Overboost / Turbo (Máxima disipación para juegos exigentes)
+  • 2 = Silencioso / Silent (Suaviza la curva térmica y reduce drásticamente el ruido)
+
+Comando directo:
+  echo 2 | sudo tee /sys/devices/platform/asus-nb-wmi/fan_boost_mode
+
+3. SERVICIO SYSTEMD DE ARRANQUE AUTOMÁTICO
+--------------------------------------------------------------------------------
+Para que el modo silencioso arranque siempre al encender el PC en cualquier distro:
+
+Crear archivo: /etc/systemd/system/asus-fan-fix.service
+----------------------------------------------------
+[Unit]
+Description=Control Silencioso de Ventiladores ASUS ROG
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 2 > /sys/devices/platform/asus-nb-wmi/fan_boost_mode'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+----------------------------------------------------
+
+Habilitarlo:
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now asus-fan-fix.service
+
+4. DOMAR LOS PICOS DE CALOR DEL PROCESADOR (INTEL TURBO BOOST)
+--------------------------------------------------------------------------------
+El i7-8750H vuela a 2.2 GHz de base. Para trabajar fresco a 45°C sin ruido:
+  echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+
+Para volver a activar toda la potencia a 4.1 GHz cuando vayas a jugar:
+  echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+
+5. CONFIGURACIÓN CORRECTA DE LA GRÁFICA NVIDIA (GTX 1060)
+--------------------------------------------------------------------------------
+NO uses 'prime-select intel' porque descalibra los sensores de la placa ASUS.
+Usa siempre modo ON-DEMAND:
+  sudo prime-select on-demand
+  sudo reboot
+
+En Arch o Fedora, instala 'switcheroo-control' o usa PRIME Offload nativo.
+La GPU permanecerá suspendida en 0W (D3cold) mientras no juegues, con sensores activos.
+
+6. TECLADO INTERNO DAÑADO (CRUCE DE MATRIZ Y CÓMO APAGARLO)
+--------------------------------------------------------------------------------
+En este portátil, el teclado integrado Aura Sync se comunica por un puerto USB
+interno ('ASUS N-KEY Device', ID 0b05:1866), NO por PS/2 tradicional.
+
+Para apagar el teclado del portátil cuando uses tu ASUS ROG Falchion:
+  xinput list | grep "Asus Keyboard" | grep -o 'id=[0-9]*' | cut -d= -f2 | while read id; do xinput disable $id; done
+  xinput disable "AT Translated Set 2 keyboard" 2>/dev/null || true
+
+Para volver a encenderlo:
+  xinput list | grep "Asus Keyboard" | grep -o 'id=[0-9]*' | cut -d= -f2 | while read id; do xinput enable $id; done
+  xinput enable "AT Translated Set 2 keyboard" 2>/dev/null || true
+
+7. MANTENIMIENTO FÍSICO
+--------------------------------------------------------------------------------
+• Modelo exacto de batería de repuesto: C41N1727 (15.4V / 66Wh).
+• Pasta térmica recomendada para portátiles gamer con contacto directo de silicio:
+  Honeywell PTM7950 (fase de cambio) o pastas densas como Noctua NT-H2 o Arctic MX-4.
+================================================================================
+"""
+
+if __name__ == "__main__":
+    app = AsusControlCenter()
+    app.connect("destroy", Gtk.main_quit)
+    app.show_all()
+    Gtk.main()

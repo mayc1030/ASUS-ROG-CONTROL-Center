@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Alternar Teclado Portátil
+Comment=Activa o desactiva el teclado interno del portátil
+Exec=/usr/local/bin/toggle-teclado-laptop
+Icon=input-keyboard
+Terminal=false
+StartupNotify=false
+Categories=Utility;Settings;

@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# asus-fan: Herramienta de control de ventiladores y temperatura para ASUS ROG
+# Modelo: ASUS ROG Strix GL504GM (y compatibles con asus-nb-wmi)
+# ==============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+ASUS_WMI="/sys/devices/platform/asus-nb-wmi"
+HWMON_DIR=$(ls -d ${ASUS_WMI}/hwmon/hwmon* 2>/dev/null | head -n 1)
+TURBO_FILE="/sys/devices/system/cpu/intel_pstate/no_turbo"
+BOOST_FILE="${ASUS_WMI}/fan_boost_mode"
+
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${YELLOW}Este cambio requiere permisos de administrador. Solicitando sudo...${NC}"
+        exec sudo "$0" "$@"
+    fi
+}
+
+get_status() {
+    echo -e "\n${BOLD}${CYAN}=== ESTADO DE VENTILADORES Y TEMPERATURAS (ASUS ROG) ===${NC}\n"
+    
+    local cpu_temp=$(sensors 2>/dev/null | grep "Package id 0:" | awk '{print $4}')
+    [ -z "$cpu_temp" ] && cpu_temp="N/D"
+    echo -e "  ${BOLD}Temperatura CPU:${NC}      ${cpu_temp}"
+
+    local avg_freq=$(awk '{sum+=$1; count++} END {printf "%.0f MHz", sum/count/1000}' /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null)
+    echo -e "  ${BOLD}Frecuencia actual:${NC}    ${avg_freq:-N/D}"
+
+    if [ -f "$TURBO_FILE" ]; then
+        local no_turbo=$(cat "$TURBO_FILE")
+        if [ "$no_turbo" -eq 1 ]; then
+            echo -e "  ${BOLD}Intel Turbo Boost:${NC}    ${GREEN}Desactivado (Silencioso y fresco a 2.2 GHz)${NC}"
+        else
+            echo -e "  ${BOLD}Intel Turbo Boost:${NC}    ${YELLOW}Activado (Hasta 4.1 GHz con posibles picos térmicos)${NC}"
+        fi
+    fi
+
+    echo ""
+    if [ -d "$HWMON_DIR" ]; then
+        local fan1_rpm=$(cat "${HWMON_DIR}/fan1_input" 2>/dev/null || echo "0")
+        local fan2_rpm=$(cat "${HWMON_DIR}/fan2_input" 2>/dev/null || echo "0")
+
+        echo -e "  ${BOLD}Ventilador 1 (CPU):${NC}   ${fan1_rpm} RPM"
+        echo -e "  ${BOLD}Ventilador 2 (GPU):${NC}   ${fan2_rpm} RPM"
+    else
+        echo -e "  ${RED}No se encontró la interfaz hwmon de ASUS.${NC}"
+    fi
+
+    if [ -f "$BOOST_FILE" ]; then
+        local boost_val=$(cat "$BOOST_FILE")
+        case "$boost_val" in
+            0) echo -e "  ${BOLD}Perfil ASUS Activo:${NC}   ${BLUE}Equilibrado / Normal (0)${NC}" ;;
+            1) echo -e "  ${BOLD}Perfil ASUS Activo:${NC}   ${RED}Overboost / Turbo (1)${NC}" ;;
+            2) echo -e "  ${BOLD}Perfil ASUS Activo:${NC}   ${GREEN}Silencioso / Silent (2) [Activo y óptimo]${NC}" ;;
+            *) echo -e "  ${BOLD}Perfil ASUS Activo:${NC}   Desconocido ($boost_val)" ;;
+        esac
+    fi
+
+    local throttle_count=$(cat /sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count 2>/dev/null || echo "0")
+    echo -e "  ${BOLD}Picos térmicos (100°C):${NC} ${throttle_count} veces registradas desde el encendido"
+    echo ""
+}
+
+apply_silent() {
+    require_root "$@"
+    echo -e "${CYAN}Aplicando perfil SILENCIOSO...${NC}"
+    
+    # Intentar ajustar PWM si el firmware lo permite (silenciar error si el firmware lo bloquea)
+    if [ -d "$HWMON_DIR" ]; then
+        [ -f "${HWMON_DIR}/pwm1_enable" ] && echo 2 > "${HWMON_DIR}/pwm1_enable" 2>/dev/null || true
+        [ -f "${HWMON_DIR}/pwm2_enable" ] && echo 2 > "${HWMON_DIR}/pwm2_enable" 2>/dev/null || true
+    fi
+
+    # En ASUS ROG GL504GM el control real lo maneja el fan_boost_mode por ACPI
+    if [ -f "$BOOST_FILE" ]; then
+        echo 2 > "$BOOST_FILE"
+    fi
+
+    echo -e "${GREEN}✔ Ventiladores configurados en modo SILENCIOSO (Silent Mode 2).${NC}"
+    get_status
+}
+
+apply_balanced() {
+    require_root "$@"
+    echo -e "${CYAN}Aplicando perfil EQUILIBRADO (Normal)...${NC}"
+    
+    if [ -f "$BOOST_FILE" ]; then
+        echo 0 > "$BOOST_FILE"
+    fi
+
+    echo -e "${GREEN}✔ Ventiladores configurados en modo EQUILIBRADO.${NC}"
+    get_status
+}
+
+apply_turbo() {
+    require_root "$@"
+    echo -e "${RED}Aplicando perfil OVERBOOST / TURBO...${NC}"
+    
+    if [ -f "$BOOST_FILE" ]; then
+        echo 1 > "$BOOST_FILE"
+    fi
+
+    echo -e "${YELLOW}✔ Ventiladores en modo MÁXIMA POTENCIA.${NC}"
+    get_status
+}
+
+set_turbo_boost() {
+    require_root "$@"
+    local action="$1"
+    if [ ! -f "$TURBO_FILE" ]; then
+        echo -e "${RED}Intel pstate turbo no está disponible.${NC}"
+        return 1
+    fi
+
+    case "$action" in
+        off|quiet|fresco|desactivar)
+            echo 1 > "$TURBO_FILE"
+            echo -e "${GREEN}✔ Intel Turbo Boost DESACTIVADO.${NC}"
+            echo -e "   El procesador operará hasta 2.2 GHz sin calentarse ni disparar ventiladores."
+            ;;
+        on|potencia|boost|activar)
+            echo 0 > "$TURBO_FILE"
+            echo -e "${YELLOW}✔ Intel Turbo Boost ACTIVADO.${NC}"
+            echo -e "   El procesador podrá subir hasta 4.1 GHz cuando lo requieras."
+            ;;
+        *)
+            echo "Uso: asus-fan turbo-boost [on|off]"
+            ;;
+    esac
+}
+
+show_help() {
+    echo -e "${BOLD}Herramienta de control para ASUS ROG GL504GM${NC}"
+    echo -e "Uso: ${CYAN}asus-fan${NC} [comando]"
+    echo ""
+    echo -e "  ${BOLD}status${NC}              Muestra temperaturas, RPM y estado de perfiles (por defecto)"
+    echo -e "  ${BOLD}silent${NC}              Activa modo silencioso de ASUS (Silent Mode 2)"
+    echo -e "  ${BOLD}balanced${NC}            Activa modo equilibrado (Normal)"
+    echo -e "  ${BOLD}turbo${NC}               Activa modo Overboost (máxima ventilación)"
+    echo -e "  ${BOLD}turbo-boost off${NC}     Desactiva el salto a 4.1 GHz (elimina el ruido del procesador)"
+    echo -e "  ${BOLD}turbo-boost on${NC}      Reactiva el salto a 4.1 GHz (máxima potencia)"
+    echo ""
+}
+
+case "$1" in
+    status|"")
+        get_status
+        ;;
+    silent|silencioso)
+        apply_silent "$@"
+        ;;
+    balanced|normal|equilibrado)
+        apply_balanced "$@"
+        ;;
+    turbo|overboost)
+        apply_turbo "$@"
+        ;;
+    turbo-boost|tb)
+        set_turbo_boost "$2"
+        ;;
+    fix|apply)
+        # Modo silencioso para servicio systemd (sin errores por bloqueo de firmware ACPI)
+        if [ -d "$HWMON_DIR" ]; then
+            [ -f "${HWMON_DIR}/pwm1_enable" ] && echo 2 > "${HWMON_DIR}/pwm1_enable" 2>/dev/null || true
+            [ -f "${HWMON_DIR}/pwm2_enable" ] && echo 2 > "${HWMON_DIR}/pwm2_enable" 2>/dev/null || true
+        fi
+        [ -f "$BOOST_FILE" ] && echo 2 > "$BOOST_FILE"
+        ;;
+    help|-h|--help)
+        show_help
+        ;;
+    *)
+        echo -e "${RED}Comando desconocido: $1${NC}"
+        show_help
+        exit 1
+        ;;
+esac

@@ -1,0 +1,11 @@
+[Unit]
+Description=Optimizacion y silencio de ventiladores ASUS ROG GL504GM
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/asus-fan fix
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

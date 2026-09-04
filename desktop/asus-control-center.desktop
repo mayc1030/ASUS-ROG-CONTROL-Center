@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ASUS ROG Control Center
+Comment=Control de ventiladores, rendimiento, teclado y guía técnica
+Exec=/usr/local/bin/asus-control-center
+Icon=utilities-system-monitor
+Terminal=false
+StartupNotify=true
+Categories=System;Settings;HardwareSettings;

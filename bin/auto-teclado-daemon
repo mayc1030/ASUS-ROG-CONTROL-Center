@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+# ==============================================================================
+# Monitor automático de teclado ASUS ROG Falchion para GL504GM
+# ==============================================================================
+
+import subprocess
+import time
+import re
+import os
+
+IGNORE_EXTERNAL = [
+    "XTEST", "Power Button", "Sleep Button", "Video Bus",
+    "Asus Wireless", "Asus WMI", "AT Translated Set 2 keyboard",
+    "Asus Keyboard", "Consumer Control", "System Control", "CHAKRAM Keyboard"
+]
+
+def has_external_keyboard():
+    try:
+        out = subprocess.check_output("xinput list", shell=True, text=True, stderr=subprocess.DEVNULL)
+        in_kbd = False
+        for line in out.splitlines():
+            if "Virtual core keyboard" in line:
+                in_kbd = True
+                continue
+            if in_kbd and "slave  keyboard" in line:
+                name = line.split("id=")[0].replace("↳", "").strip()
+                if not any(ig in name for ig in IGNORE_EXTERNAL):
+                    return True
+    except:
+        pass
+    return False
+
+def get_internal_devices():
+    out = subprocess.check_output("xinput list", shell=True, text=True, stderr=subprocess.DEVNULL)
+    internal_ids = []
+    has_active = False
+    for line in out.splitlines():
+        if ("Asus Keyboard" in line or "AT Translated Set 2 keyboard" in line) and "FALCHION" not in line and "CHAKRAM" not in line:
+            m = re.search(r"id=(\d+)", line)
+            if m:
+                dev_id = m.group(1)
+                internal_ids.append(dev_id)
+                if "[slave" in line:
+                    has_active = True
+    return internal_ids, has_active
+
+def set_internal(enable=False):
+    internal_ids, has_active = get_internal_devices()
+    action = "enable" if enable else "disable"
+    for dev_id in internal_ids:
+        subprocess.run(["xinput", action, dev_id], stderr=subprocess.DEVNULL)
+
+def notify(title, msg):
+    try:
+        subprocess.run(["notify-send", "-i", "input-keyboard", title, msg], stderr=subprocess.DEVNULL)
+    except:
+        pass
+
+last_external = None
+
+while True:
+    try:
+        ext = has_external_keyboard()
+        internal_ids, is_active = get_internal_devices()
+
+        if ext != last_external:
+            last_external = ext
+            if ext:
+                set_internal(False)
+                notify("Teclado ASUS ROG Falchion", "🔴 Teclado del portátil desactivado automáticamente.")
+            else:
+                set_internal(True)
+                notify("Teclado Externo Desconectado", "🟢 Teclado del portátil reactivado.")
+        else:
+            # Mantener estado: si hay externo pero el interno sigue activo, desactivarlo
+            if ext and is_active:
+                set_internal(False)
+            elif not ext and not is_active:
+                set_internal(True)
+    except Exception:
+        pass
+    time.sleep(3)
